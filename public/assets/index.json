@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedOn": "2026-04-12",
+  "generatedOn": "2026-04-13",
   "assets": [
     {
       "id": "universal",
@@ -8,7 +8,7 @@
       "path": "/assets/universal.glb",
       "role": "primary_fighter_prototype",
       "format": "glb",
-      "summary": "Self-contained humanoid GLB that is strong enough for a first-pass 3D fighting game prototype, training mode, animation calibration, and placeholder character blocking.",
+      "summary": "Base mannequin GLB plus compatible UAL expansion packs that keep one stable character mesh while loading a much larger merged animation library at runtime.",
       "sourceFile": {
         "sha256": "D867292451E432B735E2A910C2DB6640FBEA97B205D85A2E8FFED26DA87972CF",
         "fileSizeBytes": 8114364,
@@ -34,6 +34,436 @@
         "images": 1,
         "samplers": 1
       },
+      "animationPacks": [
+        {
+          "id": "ual1",
+          "displayName": "Universal Animation Library 1",
+          "path": "/assets/UAL1.glb",
+          "role": "animation_expansion_pack",
+          "summary": "Shared-rig mannequin expansion pack that adds climbing, crawling, dodging, extra locomotion variants, social staging, and several combat extensions.",
+          "sourceFile": {
+            "sha256": "BCCD7586A5B6B088397965DD69D431D2209BC07FB3A602BAFCA9492A7DCA69DA",
+            "fileSizeBytes": 23108672,
+            "glbVersion": 2
+          },
+          "structure": {
+            "scenes": 1,
+            "nodes": 67,
+            "meshes": 1,
+            "meshNames": [
+              "Mannequin"
+            ],
+            "materials": 2,
+            "materialNames": [
+              "M_Main",
+              "M_Joints"
+            ],
+            "skins": 1,
+            "skinNames": [
+              "Armature"
+            ],
+            "textures": 1,
+            "images": 1,
+            "samplers": 1
+          },
+          "compatibility": {
+            "baseAssetId": "universal",
+            "expectedSharedSkin": "Armature",
+            "matchingNamedNodeSet": true,
+            "integrationNote": "This pack reuses the same mannequin mesh, material names, and 67-node rig as universal.glb, so its clips can bind directly to the base fighter."
+          },
+          "mergePolicy": {
+            "duplicateClipBehavior": "keep_existing",
+            "allowedDuplicateClipNames": [
+              "A_TPose",
+              "Crouch_Fwd_Loop",
+              "Crouch_Idle_Loop",
+              "Dance_Loop",
+              "Death01",
+              "Driving_Loop",
+              "Fixing_Kneeling",
+              "Hit_Chest",
+              "Hit_Head",
+              "Idle_Loop",
+              "Idle_Talking_Loop",
+              "Idle_Torch_Loop",
+              "Interact",
+              "Jog_Fwd_Loop",
+              "Jump_Land",
+              "Jump_Loop",
+              "Jump_Start",
+              "PickUp_Table",
+              "Pistol_Aim_Down",
+              "Pistol_Aim_Neutral",
+              "Pistol_Aim_Up",
+              "Pistol_Idle_Loop",
+              "Pistol_Reload",
+              "Pistol_Shoot",
+              "Punch_Cross",
+              "Punch_Jab",
+              "Push_Loop",
+              "Roll",
+              "Roll_RM",
+              "Sitting_Enter",
+              "Sitting_Exit",
+              "Sitting_Idle_Loop",
+              "Sitting_Talking_Loop",
+              "Spell_Simple_Enter",
+              "Spell_Simple_Exit",
+              "Spell_Simple_Idle_Loop",
+              "Spell_Simple_Shoot",
+              "Sprint_Loop",
+              "Swim_Fwd_Loop",
+              "Swim_Idle_Loop",
+              "Sword_Attack",
+              "Sword_Attack_RM",
+              "Sword_Idle",
+              "Walk_Formal_Loop",
+              "Walk_Loop"
+            ]
+          },
+          "coverage": {
+            "duplicateClipCount": 45,
+            "newClipCount": 82,
+            "addsGroupIds": [
+              "ual1_traversal_and_ground_mobility",
+              "ual1_locomotion_turns_and_dodges",
+              "ual1_social_reactions_and_staging",
+              "ual1_combat_spell_and_weapon_extras"
+            ],
+            "uniqueClipGroups": [
+              {
+                "id": "ual1_traversal_and_ground_mobility",
+                "displayName": "UAL1 Traversal / Ground Mobility",
+                "notes": "Traversal-heavy clips that broaden movement debugging and environment interaction beyond the round-one fighter subset.",
+                "clipNames": [
+                  "BackFlip",
+                  "Climb_Down_Loop",
+                  "Climb_Enter",
+                  "Climb_Exit",
+                  "Climb_Idle_Loop",
+                  "Climb_Left_Loop",
+                  "Climb_Left_RM_Loop",
+                  "Climb_Right_Loop",
+                  "Climb_Right_RM_Loop",
+                  "Climb_Up_Loop",
+                  "ClimbLedge",
+                  "ClimbLedge_RM",
+                  "Crawl_Bwd_Loop",
+                  "Crawl_Enter",
+                  "Crawl_Exit",
+                  "Crawl_Fwd_Loop",
+                  "Crawl_Idle_Loop",
+                  "Crawl_Left_Loop",
+                  "Crawl_Right_Loop"
+                ]
+              },
+              {
+                "id": "ual1_locomotion_turns_and_dodges",
+                "displayName": "UAL1 Locomotion / Turns / Dodges",
+                "notes": "Extra crouch, jog, sprint-transition, turn, and dodge variants that stay on the same base mannequin rig.",
+                "clipNames": [
+                  "Crouch_Bwd_L_Loop",
+                  "Crouch_Bwd_Loop",
+                  "Crouch_Bwd_R_Loop",
+                  "Crouch_Enter",
+                  "Crouch_Exit",
+                  "Crouch_Fwd_L_Loop",
+                  "Crouch_Fwd_R_Loop",
+                  "Crouch_Left_Loop",
+                  "Crouch_Right_Loop",
+                  "Dodge_Left",
+                  "Dodge_Left_RM",
+                  "Dodge_Right",
+                  "Dodge_Right_RM",
+                  "Jog_Bwd_L_Loop",
+                  "Jog_Bwd_Loop",
+                  "Jog_Bwd_R_Loop",
+                  "Jog_Fwd_L_Loop",
+                  "Jog_Fwd_LeanL_Loop",
+                  "Jog_Fwd_LeanR_Loop",
+                  "Jog_Fwd_R_Loop",
+                  "Jog_Left_Loop",
+                  "Jog_Right_Loop",
+                  "Sprint_Enter",
+                  "Sprint_Exit",
+                  "Turn90_L",
+                  "Turn90_R"
+                ]
+              },
+              {
+                "id": "ual1_social_reactions_and_staging",
+                "displayName": "UAL1 Social / Reactions / Staging",
+                "notes": "Counter poses, seated variations, and environmental staging clips useful for menus, cutscenes, or later systemic experiments.",
+                "clipNames": [
+                  "Celebration",
+                  "Counter_Angry",
+                  "Counter_Enter",
+                  "Counter_Exit",
+                  "Counter_Give",
+                  "Counter_Idle_Loop",
+                  "Counter_Show",
+                  "Crying",
+                  "Drink",
+                  "GroundSit_Enter",
+                  "GroundSit_Exit",
+                  "GroundSit_Idle_Loop",
+                  "Idle_LookAround_Loop",
+                  "Idle_Paper",
+                  "Idle_Rock",
+                  "Idle_Scissors",
+                  "Idle_Tired_Loop",
+                  "PickUp_Kneeling",
+                  "Push_Enter",
+                  "Push_Exit",
+                  "Sitting_Idle02_Loop",
+                  "Sitting_Idle03_Loop",
+                  "Sitting_Nodding_Loop"
+                ]
+              },
+              {
+                "id": "ual1_combat_spell_and_weapon_extras",
+                "displayName": "UAL1 Combat / Spell / Weapon Extras",
+                "notes": "Extra strikes, hit reactions, spell variants, and sword transitions that can be mapped later without swapping the base mesh.",
+                "clipNames": [
+                  "Death02",
+                  "Hit_Shoulder_L",
+                  "Hit_Shoulder_R",
+                  "Hit_Stomach",
+                  "Kick",
+                  "PunchKick_Enter",
+                  "PunchKick_Exit",
+                  "Spell_Double_Enter",
+                  "Spell_Double_Exit",
+                  "Spell_Double_Idle_Loop",
+                  "Spell_Double_Shoot_Loop",
+                  "Sword_Attack_Standing",
+                  "Sword_Enter",
+                  "Sword_Exit"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "ual2",
+          "displayName": "Universal Animation Library 2",
+          "path": "/assets/UAL2.glb",
+          "role": "animation_expansion_pack",
+          "summary": "Shared-rig mannequin expansion pack focused on parkour, bow and sword combat, melee combos, life-sim interactions, and zombie movement sets.",
+          "sourceFile": {
+            "sha256": "23D0D7BF3582B9F9E0C26CE52239E29DDACD2D9C7A0735C1FAB1959B02D23A88",
+            "fileSizeBytes": 21265032,
+            "glbVersion": 2
+          },
+          "structure": {
+            "scenes": 1,
+            "nodes": 67,
+            "meshes": 1,
+            "meshNames": [
+              "Mannequin"
+            ],
+            "materials": 2,
+            "materialNames": [
+              "M_Main",
+              "M_Joints"
+            ],
+            "skins": 1,
+            "skinNames": [
+              "Armature"
+            ],
+            "textures": 1,
+            "images": 1,
+            "samplers": 1
+          },
+          "compatibility": {
+            "baseAssetId": "universal",
+            "expectedSharedSkin": "Armature",
+            "matchingNamedNodeSet": true,
+            "integrationNote": "This pack also matches the universal mannequin node names exactly, so its tracks can be merged onto the existing character without retargeting."
+          },
+          "mergePolicy": {
+            "duplicateClipBehavior": "keep_existing",
+            "allowedDuplicateClipNames": [
+              "A_TPose"
+            ]
+          },
+          "coverage": {
+            "duplicateClipCount": 1,
+            "newClipCount": 134,
+            "addsGroupIds": [
+              "ual2_parkour_and_recovery",
+              "ual2_idle_walk_and_shield_variants",
+              "ual2_bow_melee_and_sword_sets",
+              "ual2_professions_and_zombie_set"
+            ],
+            "uniqueClipGroups": [
+              {
+                "id": "ual2_parkour_and_recovery",
+                "displayName": "UAL2 Parkour / Recovery",
+                "notes": "Vaulting, wall-running, aerial recovery, and advanced traversal clips for later movement experiments.",
+                "clipNames": [
+                  "ClimbUp_1m_RM",
+                  "ClimbUp_2m_RM",
+                  "DoubleJump",
+                  "GetOffWall_2m_RM",
+                  "JogToFlip",
+                  "KipUp",
+                  "LiftAir_Fall_Impact",
+                  "LiftAir_Fall_Loop",
+                  "LiftAir_Fall_RM",
+                  "LiftAir_Hit_L",
+                  "LiftAir_Hit_R",
+                  "LiftAir_Idle_Loop",
+                  "LiftAir_RM",
+                  "NinjaJump_Double",
+                  "NinjaJump_Idle_Loop",
+                  "NinjaJump_Land",
+                  "NinjaJump_Start",
+                  "SafetyVault_RM",
+                  "Slide_Exit",
+                  "Slide_Loop",
+                  "Slide_Start",
+                  "StepUp_RM",
+                  "WallRun_Jump_L",
+                  "WallRun_Jump_R",
+                  "WallRun_L_Loop",
+                  "WallRun_R_Loop"
+                ]
+              },
+              {
+                "id": "ual2_idle_walk_and_shield_variants",
+                "displayName": "UAL2 Idle / Walk / Shield Variants",
+                "notes": "Expanded neutral poses, shield stances, transitions, and directional walk variants that stay compatible with the same base mannequin.",
+                "clipNames": [
+                  "Bandage_Loop",
+                  "Chest_Open",
+                  "Consume",
+                  "Idle_FoldArms_Loop",
+                  "Idle_Lantern_Loop",
+                  "Idle_No_Loop",
+                  "Idle_Rail_Call",
+                  "Idle_Rail_Loop",
+                  "Idle_Shield_Break",
+                  "Idle_Shield_Loop",
+                  "Idle_TalkingPhone_Loop",
+                  "IdleToLay",
+                  "LayToIdle",
+                  "MonsterTransformation",
+                  "Sprint_Shield_Loop",
+                  "Surprise",
+                  "Turn180_L_RM",
+                  "Turn180_R_RM",
+                  "Walk_Bwd_L_Loop",
+                  "Walk_Bwd_Loop",
+                  "Walk_Bwd_R_Loop",
+                  "Walk_Carry_Loop",
+                  "Walk_Fwd_L",
+                  "Walk_Fwd_Loop",
+                  "Walk_Fwd_R_Loop",
+                  "Walk_L_Loop",
+                  "Walk_R_Loop",
+                  "Yes"
+                ]
+              },
+              {
+                "id": "ual2_bow_melee_and_sword_sets",
+                "displayName": "UAL2 Bow / Melee / Sword Sets",
+                "notes": "Large combat expansion covering bow handling, shield attacks, melee combo strings, and many sword-chain variants.",
+                "clipNames": [
+                  "Bow_Aim_Down",
+                  "Bow_Aim_Neutral",
+                  "Bow_Aim_Up",
+                  "Bow_Notch",
+                  "Bow_RapidShoot_Loop",
+                  "Bow_Shoot",
+                  "Hit_Knockback",
+                  "Hit_Knockback_RM",
+                  "Melee_Combo",
+                  "Melee_Hook",
+                  "Melee_Hook_Rec",
+                  "Melee_Knee",
+                  "Melee_Knee_Rec",
+                  "Melee_Uppercut",
+                  "OverhandThrow",
+                  "Shield_Dash_RM",
+                  "Shield_OneShot",
+                  "Sword_Aerial_A",
+                  "Sword_Aerial_A_Rec",
+                  "Sword_Aerial_B",
+                  "Sword_Aerial_Combo_Loop",
+                  "Sword_Aerial_Idle_Loop",
+                  "Sword_Block",
+                  "Sword_Dash_RM",
+                  "Sword_GroundPound_RM",
+                  "Sword_Heavy_A",
+                  "Sword_Heavy_A_Rec",
+                  "Sword_Heavy_B",
+                  "Sword_Heavy_B_Rec",
+                  "Sword_Heavy_C",
+                  "Sword_Heavy_C_Rec",
+                  "Sword_Heavy_Combo",
+                  "Sword_Heavy_D",
+                  "Sword_Light_A",
+                  "Sword_Light_A_Rec",
+                  "Sword_Light_B",
+                  "Sword_Light_B_Rec",
+                  "Sword_Light_C",
+                  "Sword_Light_Combo",
+                  "Sword_Light_D",
+                  "Sword_Regular_A",
+                  "Sword_Regular_A_Rec",
+                  "Sword_Regular_B",
+                  "Sword_Regular_B_Rec",
+                  "Sword_Regular_C",
+                  "Sword_Regular_Combo",
+                  "Sword_UpperCut_RM",
+                  "SwordLight_C_Rec"
+                ]
+              },
+              {
+                "id": "ual2_professions_and_zombie_set",
+                "displayName": "UAL2 Professions / Zombie Set",
+                "notes": "Non-combat activity loops plus a full zombie locomotion set for future enemy or mode experiments.",
+                "clipNames": [
+                  "Farm_Harvest",
+                  "Farm_PickingTree",
+                  "Farm_PlantSeed",
+                  "Farm_ScatteringSeeds",
+                  "Farm_Watering",
+                  "Fish_Cast",
+                  "Fish_Cast_Idle_Loop",
+                  "Fish_OH_Idle_Loop",
+                  "Fish_Reel",
+                  "Fish_Reel_Failed",
+                  "Mining_Loop",
+                  "TreeChopping_Loop",
+                  "Zombie_Bite",
+                  "Zombie_Idle_Loop",
+                  "Zombie_Run_Bwd_L_Loop",
+                  "Zombie_Run_Bwd_Loop",
+                  "Zombie_Run_Bwd_R_Loop",
+                  "Zombie_Run_Fwd_L_Loop",
+                  "Zombie_Run_Fwd_Loop",
+                  "Zombie_Run_Fwd_R_Loop",
+                  "Zombie_Run_L_Loop",
+                  "Zombie_Run_R_Loop",
+                  "Zombie_Scratch",
+                  "Zombie_Spawn",
+                  "Zombie_Walk_Bwd_L_Loop",
+                  "Zombie_Walk_Bwd_Loop",
+                  "Zombie_Walk_Bwd_R_Loop",
+                  "Zombie_Walk_Fwd_L_Loop",
+                  "Zombie_Walk_Fwd_Loop",
+                  "Zombie_Walk_Fwd_R_Loop",
+                  "Zombie_Walk_L_Loop",
+                  "Zombie_Walk_R_Loop"
+                ]
+              }
+            ]
+          }
+        }
+      ],
       "prototypeUtility": {
         "bestUses": [
           "Main playable fighter in a Tekken-like prototype",
@@ -45,11 +475,13 @@
           "Covers baseline locomotion, crouch, jump, hit reactions, death, and light melee punches",
           "Includes root-motion variants for roll and sword attack, which are useful for advancing actions",
           "Ships as a single GLB with one embedded texture, so browser loading is simple",
-          "Single skinned mesh keeps animation indexing and mixer setup straightforward"
+          "Single skinned mesh keeps animation indexing and mixer setup straightforward",
+          "UAL1.glb and UAL2.glb share the same mannequin mesh, material names, and Armature rig, so their clips can be merged onto the base fighter without retargeting"
         ],
         "limitations": [
           "No explicit guard, sidestep, backdash, kick chain, throw, launcher, wake-up, or knockdown recovery clips",
           "Only one visual identity is present, so early versus play will need cloning or mirroring",
+          "The gym currently binds only a small locomotion/combat subset, so most expansion-pack clips load for future mappings rather than immediate controls",
           "Pistol, swimming, driving, sitting, and repair clips are secondary to the fighting prototype"
         ]
       },
@@ -77,7 +509,9 @@
           "Use exact clip names from this file instead of partial matching at runtime.",
           "Treat Roll_RM and Sword_Attack_RM as opt-in root-motion clips and validate ring movement before binding them to combat.",
           "Use SkeletonUtils.clone() for a second fighter or training dummy because the asset is skinned and animated.",
-          "Normalize the model from visible mesh bounds, not Box3.setFromObject(), to avoid floating caused by skeleton bones."
+          "Normalize the model from visible mesh bounds, not Box3.setFromObject(), to avoid floating caused by skeleton bones.",
+          "Load UAL1.glb and UAL2.glb after universal.glb and keep the base clip when a duplicate name appears in an expansion pack.",
+          "Validate that expansion packs keep the same named-node set before merging clips, because upper/lower-body masking depends on exact node names."
         ]
       },
       "animationGroups": [

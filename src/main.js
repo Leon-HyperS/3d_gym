@@ -37,21 +37,117 @@ const CONFIG = {
   cameraTargetHeight: 1.35,
   turnLerp: 10.5,
   baseYawOffset: 0,
+  aimBackClipThreshold: -0.45,
+  aimSideClipThreshold: 0.55,
+  aimStrafeForwardLimit: 0.35,
   maxDelta: 0.05,
 };
 
 const ACTIONS = {
   idle: "Idle_Loop",
   walk: "Walk_Loop",
+  walkBack: "Walk_Bwd_Loop",
+  walkBackLeft: "Walk_Bwd_L_Loop",
+  walkBackRight: "Walk_Bwd_R_Loop",
+  walkLeft: "Walk_L_Loop",
+  walkRight: "Walk_R_Loop",
   run: "Jog_Fwd_Loop",
+  runBack: "Jog_Bwd_Loop",
+  runBackLeft: "Jog_Bwd_L_Loop",
+  runBackRight: "Jog_Bwd_R_Loop",
+  runLeft: "Jog_Left_Loop",
+  runRight: "Jog_Right_Loop",
   sprint: "Sprint_Loop",
   crouchIdle: "Crouch_Idle_Loop",
   crouchMove: "Crouch_Fwd_Loop",
+  crouchBack: "Crouch_Bwd_Loop",
+  crouchBackLeft: "Crouch_Bwd_L_Loop",
+  crouchBackRight: "Crouch_Bwd_R_Loop",
+  crouchLeft: "Crouch_Left_Loop",
+  crouchRight: "Crouch_Right_Loop",
   roll: "Roll",
   pistolStance: "Pistol_Idle_Loop",
   leftPunch: "Punch_Jab",
   rightPunch: "Punch_Cross",
 };
+
+const DIRECTIONAL_ACTION_KEYS = {
+  walk: {
+    forward: "walk",
+    back: "walkBack",
+    backLeft: "walkBackLeft",
+    backRight: "walkBackRight",
+    left: "walkLeft",
+    right: "walkRight",
+  },
+  run: {
+    forward: "run",
+    back: "runBack",
+    backLeft: "runBackLeft",
+    backRight: "runBackRight",
+    left: "runLeft",
+    right: "runRight",
+  },
+  crouch: {
+    forward: "crouchMove",
+    back: "crouchBack",
+    backLeft: "crouchBackLeft",
+    backRight: "crouchBackRight",
+    left: "crouchLeft",
+    right: "crouchRight",
+  },
+};
+
+const LOWER_BODY_ACTION_KEYS = [
+  "idle",
+  "walk",
+  "walkBack",
+  "walkBackLeft",
+  "walkBackRight",
+  "walkLeft",
+  "walkRight",
+  "run",
+  "runBack",
+  "runBackLeft",
+  "runBackRight",
+  "runLeft",
+  "runRight",
+  "sprint",
+  "crouchIdle",
+  "crouchMove",
+  "crouchBack",
+  "crouchBackLeft",
+  "crouchBackRight",
+  "crouchLeft",
+  "crouchRight",
+];
+
+const REQUIRED_ACTION_KEYS = [
+  ...LOWER_BODY_ACTION_KEYS,
+  "roll",
+  "pistolStance",
+  "leftPunch",
+  "rightPunch",
+];
+
+const ALWAYS_PREVENT_DEFAULT_CODES = new Set([
+  "Space",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+]);
+
+const CTRL_SHORTCUT_BLOCKED_CODES = new Set([
+  "KeyW",
+  "KeyA",
+  "KeyS",
+  "KeyD",
+  "KeyQ",
+  "KeyE",
+  "KeyR",
+  "KeyF",
+]);
 
 const UPPER_BODY_NODES = new Set([
   "spine_01",
@@ -190,6 +286,8 @@ const tempEuler = new THREE.Euler();
 const tempCameraPosition = new THREE.Vector3();
 const tempScreenPoint = new THREE.Vector3();
 const tempWorldForward = new THREE.Vector3();
+const tempAimDirection = new THREE.Vector3();
+const tempAimRight = new THREE.Vector3();
 
 window.__TEST__ = {
   ready: false,
@@ -309,6 +407,13 @@ function bindUi() {
 
 function bindKeyboard() {
   window.addEventListener("keydown", (event) => {
+    if (
+      ALWAYS_PREVENT_DEFAULT_CODES.has(event.code) ||
+      ((event.ctrlKey || event.metaKey) && CTRL_SHORTCUT_BLOCKED_CODES.has(event.code))
+    ) {
+      event.preventDefault();
+    }
+
     if (event.repeat) {
       return;
     }
@@ -476,6 +581,111 @@ function handleResize() {
   );
 }
 
+function getAnimationPacks(asset) {
+  return Array.isArray(asset?.animationPacks) ? asset.animationPacks : [];
+}
+
+function normalizeAssetContract(asset) {
+  if (!asset?.path) {
+    throw new Error("Asset contract is missing a base model path for 'universal'");
+  }
+
+  const animationPacks = getAnimationPacks(asset);
+  for (const pack of animationPacks) {
+    if (!pack?.id) {
+      throw new Error("Animation pack entry is missing an id");
+    }
+    if (!pack.path) {
+      throw new Error(`Animation pack '${pack.id}' is missing a path`);
+    }
+  }
+
+  return {
+    ...asset,
+    animationPacks,
+  };
+}
+
+function collectNamedSceneNodes(root) {
+  const names = new Set();
+  root.traverse((child) => {
+    if (child.name) {
+      names.add(child.name);
+    }
+  });
+  return names;
+}
+
+function previewNameList(values, limit = 12) {
+  const items = [...values];
+  if (items.length === 0) {
+    return "none";
+  }
+  if (items.length <= limit) {
+    return items.join(", ");
+  }
+  return `${items.slice(0, limit).join(", ")}, ... (+${items.length - limit} more)`;
+}
+
+function getAssetSourceLabel(source) {
+  return source?.displayName ?? source?.id ?? source?.path ?? "unknown source";
+}
+
+function validateAnimationPackCompatibility(baseScene, packScene, pack) {
+  const baseNodeNames = collectNamedSceneNodes(baseScene);
+  const packNodeNames = collectNamedSceneNodes(packScene);
+  const missingNodeNames = [...baseNodeNames].filter((name) => !packNodeNames.has(name)).sort();
+  const extraNodeNames = [...packNodeNames].filter((name) => !baseNodeNames.has(name)).sort();
+
+  if (missingNodeNames.length === 0 && extraNodeNames.length === 0) {
+    return;
+  }
+
+  const issues = [];
+  if (missingNodeNames.length > 0) {
+    issues.push(`missing nodes: ${previewNameList(missingNodeNames)}`);
+  }
+  if (extraNodeNames.length > 0) {
+    issues.push(`extra nodes: ${previewNameList(extraNodeNames)}`);
+  }
+
+  throw new Error(
+    `Animation pack '${pack.id}' is not rig-compatible with the universal base model (${issues.join("; ")})`,
+  );
+}
+
+function registerAnimationClips(
+  clipRegistry,
+  clipSources,
+  animations,
+  source,
+  { duplicateBehavior = "error", allowedDuplicateClipNames = [] } = {},
+) {
+  const sourceLabel = getAssetSourceLabel(source);
+  const allowedDuplicateNames = new Set(allowedDuplicateClipNames);
+  const skippedDuplicates = [];
+
+  for (const clip of animations) {
+    const existingSource = clipSources.get(clip.name);
+    if (existingSource) {
+      const allowDuplicate =
+        duplicateBehavior === "keep_existing" && allowedDuplicateNames.has(clip.name);
+      if (!allowDuplicate) {
+        throw new Error(
+          `Duplicate clip '${clip.name}' found in ${sourceLabel}; already provided by ${existingSource}`,
+        );
+      }
+      skippedDuplicates.push(clip.name);
+      continue;
+    }
+
+    clipRegistry.set(clip.name, clip);
+    clipSources.set(clip.name, sourceLabel);
+  }
+
+  return skippedDuplicates;
+}
+
 async function loadAssetContract() {
   const response = await fetch("/assets/index.json");
   if (!response.ok) {
@@ -488,13 +698,52 @@ async function loadAssetContract() {
     throw new Error("Asset contract does not contain 'universal'");
   }
 
-  return asset;
+  return normalizeAssetContract(asset);
 }
 
 async function loadHero(scene, asset) {
   const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync(asset.path);
-  console.log("Loaded clips:", gltf.animations.map((clip) => clip.name));
+  const baseGltf = await loader.loadAsync(asset.path);
+  const animationPacks = getAnimationPacks(asset);
+  const packLoads = await Promise.all(
+    animationPacks.map(async (pack) => ({
+      pack,
+      gltf: await loader.loadAsync(pack.path),
+    })),
+  );
+
+  for (const { pack, gltf } of packLoads) {
+    validateAnimationPackCompatibility(baseGltf.scene, gltf.scene, pack);
+  }
+
+  const mergedClipRegistry = new Map();
+  const clipSources = new Map();
+  registerAnimationClips(mergedClipRegistry, clipSources, baseGltf.animations, asset);
+
+  const packSummaries = [];
+  for (const { pack, gltf } of packLoads) {
+    const skippedDuplicates = registerAnimationClips(
+      mergedClipRegistry,
+      clipSources,
+      gltf.animations,
+      pack,
+      {
+        duplicateBehavior: pack.mergePolicy?.duplicateClipBehavior ?? "error",
+        allowedDuplicateClipNames: pack.mergePolicy?.allowedDuplicateClipNames ?? [],
+      },
+    );
+
+    packSummaries.push({
+      id: pack.id,
+      clips: gltf.animations.length,
+      skippedDuplicates: skippedDuplicates.length,
+    });
+  }
+
+  console.log("Merged clips:", [...mergedClipRegistry.keys()]);
+  if (packSummaries.length > 0) {
+    console.log("Animation pack merge summary:", packSummaries);
+  }
 
   const root = new THREE.Group();
   root.name = "HeroRoot";
@@ -504,7 +753,7 @@ async function loadHero(scene, asset) {
   visualRoot.name = "HeroVisualRoot";
   root.add(visualRoot);
 
-  const model = SkeletonUtils.clone(gltf.scene);
+  const model = SkeletonUtils.clone(baseGltf.scene);
   model.traverse((child) => {
     if (child.isMesh) {
       child.castShadow = true;
@@ -523,27 +772,19 @@ async function loadHero(scene, asset) {
   const mixer = new THREE.AnimationMixer(model);
   const clips = new Map();
   const actions = new Map();
-  for (const clip of gltf.animations) {
-    clips.set(clip.name, clip);
-    actions.set(clip.name, mixer.clipAction(clip));
+  for (const [clipName, clip] of mergedClipRegistry.entries()) {
+    clips.set(clipName, clip);
+    actions.set(clipName, mixer.clipAction(clip));
   }
 
-  const requiredClips = [
-    ACTIONS.idle,
-    ACTIONS.walk,
-    ACTIONS.run,
-    ACTIONS.sprint,
-    ACTIONS.crouchIdle,
-    ACTIONS.crouchMove,
-    ACTIONS.roll,
-    ACTIONS.pistolStance,
-    ACTIONS.leftPunch,
-    ACTIONS.rightPunch,
-  ];
+  const requiredClips = [...new Set(REQUIRED_ACTION_KEYS.map((actionKey) => ACTIONS[actionKey]))];
+  const availableClipNames = [...clips.keys()].sort();
 
   for (const clipName of requiredClips) {
     if (!actions.has(clipName)) {
-      throw new Error(`Required clip missing: ${clipName}`);
+      throw new Error(
+        `Required clip missing after merge: ${clipName}. Available clips: ${previewNameList(availableClipNames, 18)}`,
+      );
     }
   }
 
@@ -554,14 +795,16 @@ async function loadHero(scene, asset) {
       leftPunch: createMaskedClip(clips.get(ACTIONS.leftPunch), UPPER_BODY_NODES, "PunchJabUpper"),
       rightPunch: createMaskedClip(clips.get(ACTIONS.rightPunch), UPPER_BODY_NODES, "PunchCrossUpper"),
     },
-    lower: {
-      idle: createMaskedClip(clips.get(ACTIONS.idle), LOWER_BODY_NODES, "IdleLower"),
-      walk: createMaskedClip(clips.get(ACTIONS.walk), LOWER_BODY_NODES, "WalkLower"),
-      run: createMaskedClip(clips.get(ACTIONS.run), LOWER_BODY_NODES, "RunLower"),
-      sprint: createMaskedClip(clips.get(ACTIONS.sprint), LOWER_BODY_NODES, "SprintLower"),
-      crouchIdle: createMaskedClip(clips.get(ACTIONS.crouchIdle), LOWER_BODY_NODES, "CrouchIdleLower"),
-      crouchMove: createMaskedClip(clips.get(ACTIONS.crouchMove), LOWER_BODY_NODES, "CrouchMoveLower"),
-    },
+    lower: Object.fromEntries(
+      LOWER_BODY_ACTION_KEYS.map((actionKey) => [
+        actionKey,
+        createMaskedClip(
+          clips.get(ACTIONS[actionKey]),
+          LOWER_BODY_NODES,
+          `${actionKey.charAt(0).toUpperCase()}${actionKey.slice(1)}Lower`,
+        ),
+      ]),
+    ),
   };
   const layeredActions = {
     upper: {
@@ -569,14 +812,12 @@ async function loadHero(scene, asset) {
       leftPunch: mixer.clipAction(layeredClips.upper.leftPunch),
       rightPunch: mixer.clipAction(layeredClips.upper.rightPunch),
     },
-    lower: {
-      idle: mixer.clipAction(layeredClips.lower.idle),
-      walk: mixer.clipAction(layeredClips.lower.walk),
-      run: mixer.clipAction(layeredClips.lower.run),
-      sprint: mixer.clipAction(layeredClips.lower.sprint),
-      crouchIdle: mixer.clipAction(layeredClips.lower.crouchIdle),
-      crouchMove: mixer.clipAction(layeredClips.lower.crouchMove),
-    },
+    lower: Object.fromEntries(
+      LOWER_BODY_ACTION_KEYS.map((actionKey) => [
+        actionKey,
+        mixer.clipAction(layeredClips.lower[actionKey]),
+      ]),
+    ),
   };
 
   const rollClipDuration = actions.get(ACTIONS.roll).getClip().duration / CONFIG.rollPlaybackSpeed;
@@ -592,6 +833,7 @@ async function loadHero(scene, asset) {
     model,
     mixer,
     clips,
+    clipSources,
     actions,
     layeredActions,
     helpers,
@@ -1651,15 +1893,87 @@ function getCameraRelativeMove() {
   return tempMove;
 }
 
+function getAimForwardVector(hero, target = tempAimDirection) {
+  target.subVectors(runtime.aimPoint, hero.root.position);
+  target.y = 0;
+
+  if (target.lengthSq() < 0.0001) {
+    target.set(Math.sin(hero.root.rotation.y), 0, Math.cos(hero.root.rotation.y));
+    return target;
+  }
+
+  target.normalize();
+  return target;
+}
+
+function getAimRelativeMoveDirection(hero) {
+  if (!hero || hero.moveDirection.lengthSq() < 0.0001) {
+    return "forward";
+  }
+
+  const aimForward = getAimForwardVector(hero);
+  tempAimRight.crossVectors(aimForward, UP).normalize();
+
+  const forwardDot = hero.moveDirection.dot(aimForward);
+  const rightDot = hero.moveDirection.dot(tempAimRight);
+
+  if (forwardDot <= CONFIG.aimBackClipThreshold) {
+    if (rightDot <= -CONFIG.aimSideClipThreshold) {
+      return "backLeft";
+    }
+    if (rightDot >= CONFIG.aimSideClipThreshold) {
+      return "backRight";
+    }
+    return "back";
+  }
+
+  if (Math.abs(forwardDot) <= CONFIG.aimStrafeForwardLimit) {
+    if (rightDot <= -CONFIG.aimSideClipThreshold) {
+      return "left";
+    }
+    if (rightDot >= CONFIG.aimSideClipThreshold) {
+      return "right";
+    }
+  }
+
+  return "forward";
+}
+
+function getDirectionalActionKey(group, direction) {
+  return DIRECTIONAL_ACTION_KEYS[group][direction] ?? DIRECTIONAL_ACTION_KEYS[group].forward;
+}
+
+function resolveLocomotionActionKey(hero) {
+  const moving = hero.moveDirection.lengthSq() > 0;
+  if (!moving) {
+    return runtime.input.crouchModifier ? "crouchIdle" : "idle";
+  }
+
+  const direction = getAimRelativeMoveDirection(hero);
+  if (runtime.input.crouchModifier) {
+    return getDirectionalActionKey("crouch", direction);
+  }
+
+  if (runtime.input.pistolStance) {
+    return getDirectionalActionKey("walk", direction);
+  }
+
+  if (direction === "forward" && runtime.input.sprintModifier) {
+    return "sprint";
+  }
+
+  return getDirectionalActionKey("run", direction);
+}
+
 function syncGroundedAnimation(hero, force = false) {
   if (!hero || !hero.grounded || hero.actionLock === "roll") {
     return;
   }
 
-  const moving = hero.moveDirection.lengthSq() > 0;
+  const locomotionActionKey = resolveLocomotionActionKey(hero);
   if (hero.upperBodyActionLock) {
     const upperLayer = getUpperBodyLayer(hero);
-    const lowerLayer = getLowerBodyLayer(hero, { moving });
+    const lowerLayer = getLowerBodyLayer(hero, locomotionActionKey);
     playLayeredState(hero, {
       upperAction: upperLayer.action,
       upperClip: upperLayer.clip,
@@ -1672,7 +1986,7 @@ function syncGroundedAnimation(hero, force = false) {
   }
 
   if (runtime.input.pistolStance) {
-    const lowerLayer = getLowerBodyLayer(hero, { moving, forceWalk: true });
+    const lowerLayer = getLowerBodyLayer(hero, locomotionActionKey);
     playLayeredState(hero, {
       upperAction: hero.layeredActions.upper.pistol,
       upperClip: ACTIONS.pistolStance,
@@ -1684,15 +1998,7 @@ function syncGroundedAnimation(hero, force = false) {
     return;
   }
 
-  const locomotionClip = runtime.input.crouchModifier
-    ? moving
-      ? ACTIONS.crouchMove
-      : ACTIONS.crouchIdle
-    : moving
-      ? runtime.input.sprintModifier
-        ? ACTIONS.sprint
-        : ACTIONS.run
-      : ACTIONS.idle;
+  const locomotionClip = ACTIONS[locomotionActionKey];
   playClip(hero, locomotionClip, {
     loop: true,
     fade: 0.12,
@@ -1714,45 +2020,10 @@ function getUpperBodyLayer(hero) {
   };
 }
 
-function getLowerBodyLayer(hero, { moving, forceWalk = false } = {}) {
-  if (!moving) {
-    if (!forceWalk && runtime.input.crouchModifier) {
-      return {
-        action: hero.layeredActions.lower.crouchIdle,
-        clip: ACTIONS.crouchIdle,
-      };
-    }
-
-    return {
-      action: hero.layeredActions.lower.idle,
-      clip: ACTIONS.idle,
-    };
-  }
-
-  if (forceWalk) {
-    return {
-      action: hero.layeredActions.lower.walk,
-      clip: ACTIONS.walk,
-    };
-  }
-
-  if (runtime.input.crouchModifier) {
-    return {
-      action: hero.layeredActions.lower.crouchMove,
-      clip: ACTIONS.crouchMove,
-    };
-  }
-
-  if (runtime.input.sprintModifier) {
-    return {
-      action: hero.layeredActions.lower.sprint,
-      clip: ACTIONS.sprint,
-    };
-  }
-
+function getLowerBodyLayer(hero, actionKey = resolveLocomotionActionKey(hero)) {
   return {
-    action: hero.layeredActions.lower.run,
-    clip: ACTIONS.run,
+    action: hero.layeredActions.lower[actionKey],
+    clip: ACTIONS[actionKey],
   };
 }
 
