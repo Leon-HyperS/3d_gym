@@ -12,6 +12,10 @@ const CONFIG = {
   runSpeed: 4.15,
   sprintSpeed: 5.65,
   rollSpeed: 6.5,
+  rollPlaybackSpeed: 1.55,
+  rollExitFraction: 0.5,
+  rollMinDuration: 0.22,
+  rollMaxDuration: 0.34,
   cameraOffset: new THREE.Vector3(6.8, 6.8, 6.8),
   cameraLerp: 7.5,
   cameraTargetHeight: 1.35,
@@ -529,15 +533,42 @@ async function loadHero(scene, asset) {
 
   const helpers = createHeroDebugHelpers(scene, root, visualRoot, model);
   const layeredClips = {
-    pistolUpper: createMaskedClip(clips.get(ACTIONS.pistolStance), UPPER_BODY_NODES, "PistolUpper"),
-    idleLower: createMaskedClip(clips.get(ACTIONS.idle), LOWER_BODY_NODES, "IdleLower"),
-    walkLower: createMaskedClip(clips.get(ACTIONS.walk), LOWER_BODY_NODES, "WalkLower"),
+    upper: {
+      pistol: createMaskedClip(clips.get(ACTIONS.pistolStance), UPPER_BODY_NODES, "PistolUpper"),
+      leftPunch: createMaskedClip(clips.get(ACTIONS.leftPunch), UPPER_BODY_NODES, "PunchJabUpper"),
+      rightPunch: createMaskedClip(clips.get(ACTIONS.rightPunch), UPPER_BODY_NODES, "PunchCrossUpper"),
+    },
+    lower: {
+      idle: createMaskedClip(clips.get(ACTIONS.idle), LOWER_BODY_NODES, "IdleLower"),
+      walk: createMaskedClip(clips.get(ACTIONS.walk), LOWER_BODY_NODES, "WalkLower"),
+      run: createMaskedClip(clips.get(ACTIONS.run), LOWER_BODY_NODES, "RunLower"),
+      sprint: createMaskedClip(clips.get(ACTIONS.sprint), LOWER_BODY_NODES, "SprintLower"),
+      crouchIdle: createMaskedClip(clips.get(ACTIONS.crouchIdle), LOWER_BODY_NODES, "CrouchIdleLower"),
+      crouchMove: createMaskedClip(clips.get(ACTIONS.crouchMove), LOWER_BODY_NODES, "CrouchMoveLower"),
+    },
   };
   const layeredActions = {
-    pistolUpper: mixer.clipAction(layeredClips.pistolUpper),
-    idleLower: mixer.clipAction(layeredClips.idleLower),
-    walkLower: mixer.clipAction(layeredClips.walkLower),
+    upper: {
+      pistol: mixer.clipAction(layeredClips.upper.pistol),
+      leftPunch: mixer.clipAction(layeredClips.upper.leftPunch),
+      rightPunch: mixer.clipAction(layeredClips.upper.rightPunch),
+    },
+    lower: {
+      idle: mixer.clipAction(layeredClips.lower.idle),
+      walk: mixer.clipAction(layeredClips.lower.walk),
+      run: mixer.clipAction(layeredClips.lower.run),
+      sprint: mixer.clipAction(layeredClips.lower.sprint),
+      crouchIdle: mixer.clipAction(layeredClips.lower.crouchIdle),
+      crouchMove: mixer.clipAction(layeredClips.lower.crouchMove),
+    },
   };
+
+  const rollClipDuration = actions.get(ACTIONS.roll).getClip().duration / CONFIG.rollPlaybackSpeed;
+  const rollExitDuration = THREE.MathUtils.clamp(
+    rollClipDuration * CONFIG.rollExitFraction,
+    CONFIG.rollMinDuration,
+    CONFIG.rollMaxDuration,
+  );
 
   const hero = {
     root,
@@ -557,9 +588,11 @@ async function loadHero(scene, asset) {
     animationMode: "full",
     grounded: true,
     actionLock: null,
+    upperBodyActionLock: null,
     moveDirection: new THREE.Vector3(0, 0, 1),
     lastMoveDirection: new THREE.Vector3(0, 0, 1),
-    rollDuration: actions.get(ACTIONS.roll).getClip().duration,
+    rollDuration: rollClipDuration,
+    rollExitDuration,
     rollTimeLeft: 0,
     rollDirection: new THREE.Vector3(0, 0, 1),
   };
@@ -570,8 +603,8 @@ async function loadHero(scene, asset) {
       return;
     }
 
-    if (finishedClip === ACTIONS.leftPunch || finishedClip === ACTIONS.rightPunch) {
-      hero.actionLock = null;
+    if (finishedClip === "PunchJabUpper" || finishedClip === "PunchCrossUpper") {
+      hero.upperBodyActionLock = null;
       syncGroundedAnimation(hero, true);
     }
 
@@ -1416,13 +1449,16 @@ function updateHero(dt) {
   hero.moveDirection.copy(desiredMove);
 
   const isRolling = hero.actionLock === "roll";
-  const canMoveOnGround = !hero.actionLock;
+  const canMoveOnGround = !isRolling;
   const moveStrength = desiredMove.lengthSq();
 
   if (isRolling && hero.rollTimeLeft > 0) {
     hero.root.position.addScaledVector(hero.rollDirection, CONFIG.rollSpeed * dt);
     hero.lastMoveDirection.copy(hero.rollDirection);
     hero.rollTimeLeft = Math.max(0, hero.rollTimeLeft - dt);
+    if (hero.rollTimeLeft === 0) {
+      finishRoll(hero);
+    }
   } else if (moveStrength > 0) {
     hero.lastMoveDirection.copy(desiredMove);
     const speed = runtime.input.pistolStance
@@ -1437,7 +1473,7 @@ function updateHero(dt) {
     }
   }
 
-  if (!hero.actionLock) {
+  if (!isRolling) {
     syncGroundedAnimation(hero);
   }
 }
@@ -1557,6 +1593,10 @@ function updateStatusPanel() {
   dom.clip.textContent = hero.currentClip;
   dom.state.textContent = hero.actionLock
     ? hero.actionLock
+    : hero.upperBodyActionLock === ACTIONS.leftPunch
+      ? "leftPunch"
+      : hero.upperBodyActionLock === ACTIONS.rightPunch
+        ? "rightPunch"
     : runtime.input.pistolStance
       ? hero.moveDirection.lengthSq() > 0
         ? "pistolWalk"
@@ -1596,13 +1636,35 @@ function getCameraRelativeMove() {
 }
 
 function syncGroundedAnimation(hero, force = false) {
-  if (!hero || !hero.grounded || hero.actionLock) {
+  if (!hero || !hero.grounded || hero.actionLock === "roll") {
     return;
   }
 
   const moving = hero.moveDirection.lengthSq() > 0;
+  if (hero.upperBodyActionLock) {
+    const upperLayer = getUpperBodyLayer(hero);
+    const lowerLayer = getLowerBodyLayer(hero, { moving });
+    playLayeredState(hero, {
+      upperAction: upperLayer.action,
+      upperClip: upperLayer.clip,
+      upperLoop: false,
+      lowerAction: lowerLayer.action,
+      lowerClip: lowerLayer.clip,
+      force,
+    });
+    return;
+  }
+
   if (runtime.input.pistolStance) {
-    playLayeredPistol(hero, { moving, force });
+    const lowerLayer = getLowerBodyLayer(hero, { moving, forceWalk: true });
+    playLayeredState(hero, {
+      upperAction: hero.layeredActions.upper.pistol,
+      upperClip: ACTIONS.pistolStance,
+      upperLoop: true,
+      lowerAction: lowerLayer.action,
+      lowerClip: lowerLayer.clip,
+      force,
+    });
     return;
   }
 
@@ -1622,9 +1684,68 @@ function syncGroundedAnimation(hero, force = false) {
   });
 }
 
-function playLayeredPistol(hero, { moving, force = false } = {}) {
-  const nextUpper = hero.layeredActions.pistolUpper;
-  const nextLower = moving ? hero.layeredActions.walkLower : hero.layeredActions.idleLower;
+function getUpperBodyLayer(hero) {
+  if (hero.upperBodyActionLock === ACTIONS.leftPunch) {
+    return {
+      action: hero.layeredActions.upper.leftPunch,
+      clip: ACTIONS.leftPunch,
+    };
+  }
+
+  return {
+    action: hero.layeredActions.upper.rightPunch,
+    clip: ACTIONS.rightPunch,
+  };
+}
+
+function getLowerBodyLayer(hero, { moving, forceWalk = false } = {}) {
+  if (!moving) {
+    if (!forceWalk && runtime.input.crouchModifier) {
+      return {
+        action: hero.layeredActions.lower.crouchIdle,
+        clip: ACTIONS.crouchIdle,
+      };
+    }
+
+    return {
+      action: hero.layeredActions.lower.idle,
+      clip: ACTIONS.idle,
+    };
+  }
+
+  if (forceWalk) {
+    return {
+      action: hero.layeredActions.lower.walk,
+      clip: ACTIONS.walk,
+    };
+  }
+
+  if (runtime.input.crouchModifier) {
+    return {
+      action: hero.layeredActions.lower.crouchMove,
+      clip: ACTIONS.crouchMove,
+    };
+  }
+
+  if (runtime.input.sprintModifier) {
+    return {
+      action: hero.layeredActions.lower.sprint,
+      clip: ACTIONS.sprint,
+    };
+  }
+
+  return {
+    action: hero.layeredActions.lower.run,
+    clip: ACTIONS.run,
+  };
+}
+
+function playLayeredState(
+  hero,
+  { upperAction, upperClip, upperLoop = true, lowerAction, lowerClip, force = false, fade = 0.08 },
+) {
+  const nextUpper = upperAction;
+  const nextLower = lowerAction;
 
   if (!force &&
       hero.animationMode === "layered" &&
@@ -1636,39 +1757,39 @@ function playLayeredPistol(hero, { moving, force = false } = {}) {
     if (!nextLower.isRunning()) {
       nextLower.play();
     }
-    hero.currentClip = moving ? `${ACTIONS.pistolStance} + ${ACTIONS.walk}` : `${ACTIONS.pistolStance} + ${ACTIONS.idle}`;
-    hero.upperClip = ACTIONS.pistolStance;
-    hero.lowerClip = moving ? ACTIONS.walk : ACTIONS.idle;
+    hero.currentClip = `${upperClip} + ${lowerClip}`;
+    hero.upperClip = upperClip;
+    hero.lowerClip = lowerClip;
     return;
   }
 
   if (hero.currentAction) {
-    hero.currentAction.fadeOut(0.1);
+    hero.currentAction.fadeOut(fade);
     hero.currentAction = null;
   }
 
   if (hero.currentUpperAction && hero.currentUpperAction !== nextUpper) {
-    hero.currentUpperAction.fadeOut(0.08);
+    hero.currentUpperAction.fadeOut(fade);
   }
 
   if (hero.currentLowerAction && hero.currentLowerAction !== nextLower) {
-    hero.currentLowerAction.fadeOut(0.08);
+    hero.currentLowerAction.fadeOut(fade);
   }
 
   if (force || hero.currentUpperAction !== nextUpper || !nextUpper.isRunning()) {
-    configureLayerAction(nextUpper, { loop: true, fade: 0.08 });
+    configureLayerAction(nextUpper, { loop: upperLoop, fade });
   }
 
   if (force || hero.currentLowerAction !== nextLower || !nextLower.isRunning()) {
-    configureLayerAction(nextLower, { loop: true, fade: 0.08 });
+    configureLayerAction(nextLower, { loop: true, fade });
   }
 
   hero.currentUpperAction = nextUpper;
   hero.currentLowerAction = nextLower;
   hero.animationMode = "layered";
-  hero.currentClip = moving ? `${ACTIONS.pistolStance} + ${ACTIONS.walk}` : `${ACTIONS.pistolStance} + ${ACTIONS.idle}`;
-  hero.upperClip = ACTIONS.pistolStance;
-  hero.lowerClip = moving ? ACTIONS.walk : ACTIONS.idle;
+  hero.currentClip = `${upperClip} + ${lowerClip}`;
+  hero.upperClip = upperClip;
+  hero.lowerClip = lowerClip;
 }
 
 function configureLayerAction(action, { loop, fade }) {
@@ -1687,28 +1808,42 @@ function requestRoll() {
   }
 
   hero.actionLock = "roll";
-  hero.rollTimeLeft = hero.rollDuration;
+  hero.upperBodyActionLock = null;
+  hero.rollTimeLeft = hero.rollExitDuration;
   hero.rollDirection.set(
     Math.sin(hero.root.rotation.y),
     0,
     Math.cos(hero.root.rotation.y),
   ).normalize();
   hero.lastMoveDirection.copy(hero.rollDirection);
-  playClip(hero, ACTIONS.roll, { loop: false, fade: 0.05, force: true });
-  flashScreen("#6dc8ff", 0.12, 90);
+  playClip(hero, ACTIONS.roll, {
+    loop: false,
+    fade: 0.04,
+    force: true,
+    timeScale: CONFIG.rollPlaybackSpeed,
+  });
   showToast("Roll");
 }
 
 function requestPunch(clipName, label) {
   const hero = runtime.hero;
-  if (!hero || !hero.grounded || hero.actionLock) {
+  if (!hero || !hero.grounded || hero.actionLock || hero.upperBodyActionLock) {
     return;
   }
 
-  hero.actionLock = clipName === ACTIONS.leftPunch ? "leftPunch" : "rightPunch";
-  playClip(hero, clipName, { loop: false, fade: 0.06, force: true });
-  flashScreen(clipName === ACTIONS.leftPunch ? "#ffbe55" : "#ff8455", 0.14, 80);
+  hero.upperBodyActionLock = clipName;
+  syncGroundedAnimation(hero, true);
   showToast(label);
+}
+
+function finishRoll(hero) {
+  if (!hero || hero.actionLock !== "roll") {
+    return;
+  }
+
+  hero.actionLock = null;
+  hero.rollTimeLeft = 0;
+  syncGroundedAnimation(hero, true);
 }
 
 function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, timeScale = 1 } = {}) {
@@ -1768,6 +1903,7 @@ function resetHeroTransform() {
   runtime.hero.root.rotation.set(0, 0, 0);
   runtime.hero.grounded = true;
   runtime.hero.actionLock = null;
+  runtime.hero.upperBodyActionLock = null;
   runtime.hero.rollTimeLeft = 0;
   runtime.hero.rollDirection.set(0, 0, 1);
   runtime.hero.lastMoveDirection.set(0, 0, 1);
@@ -1866,6 +2002,9 @@ function getTestState() {
     animationMode: runtime.hero.animationMode,
     upperClip: runtime.hero.upperClip,
     lowerClip: runtime.hero.lowerClip,
+    actionLock: runtime.hero.actionLock,
+    upperBodyActionLock: runtime.hero.upperBodyActionLock,
+    rollTimeLeft: runtime.hero.rollTimeLeft,
     sprintModifier: runtime.input.sprintModifier,
     crouchModifier: runtime.input.crouchModifier,
     pistolStance: runtime.input.pistolStance,
