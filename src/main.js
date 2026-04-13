@@ -35,6 +35,9 @@ const CONFIG = {
   cameraPitchDeg: 40,
   cameraDistance: 12.4,
   cameraFov: 48,
+  cameraMinFov: 26,
+  cameraMaxFov: 72,
+  cameraWheelFovStep: 2,
   cameraOffset: makeCameraOffset(45, 40, 12.4),
   cameraLerp: 7.5,
   cameraTargetHeight: 1.35,
@@ -388,11 +391,30 @@ function createControls(camera, domElement) {
   const controls = new OrbitControls(camera, domElement);
   controls.enableDamping = true;
   controls.enabled = false;
+  controls.enableZoom = false;
   controls.minDistance = 4;
   controls.maxDistance = 16;
   controls.maxPolarAngle = Math.PI * 0.475;
   controls.target.set(0, CONFIG.cameraTargetHeight, 0);
   return controls;
+}
+
+function adjustCameraFov(deltaY) {
+  if (!runtime.camera) {
+    return;
+  }
+
+  const direction = Math.sign(deltaY);
+  if (direction === 0) {
+    return;
+  }
+
+  runtime.camera.fov = THREE.MathUtils.clamp(
+    runtime.camera.fov + direction * CONFIG.cameraWheelFovStep,
+    CONFIG.cameraMinFov,
+    CONFIG.cameraMaxFov,
+  );
+  runtime.camera.updateProjectionMatrix();
 }
 
 function bindUi() {
@@ -597,6 +619,11 @@ function bindPointer() {
   window.addEventListener("contextmenu", (event) => {
     event.preventDefault();
   });
+
+  runtime.renderer.domElement.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    adjustCameraFov(event.deltaY);
+  }, { passive: false });
 
   window.addEventListener("mousedown", (event) => {
     const targetElement = event.target instanceof Element ? event.target : null;
