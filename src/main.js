@@ -4,6 +4,18 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
+function makeCameraOffset(yawDeg, pitchDeg, distance) {
+  const yaw = THREE.MathUtils.degToRad(yawDeg);
+  const pitch = THREE.MathUtils.degToRad(pitchDeg);
+  const horizontalDistance = Math.cos(pitch) * distance;
+
+  return new THREE.Vector3(
+    Math.sin(yaw) * horizontalDistance,
+    Math.sin(pitch) * distance,
+    Math.cos(yaw) * horizontalDistance,
+  );
+}
+
 const CONFIG = {
   ringY: 0,
   heroHeight: 1.9,
@@ -16,7 +28,11 @@ const CONFIG = {
   rollExitFraction: 0.5,
   rollMinDuration: 0.22,
   rollMaxDuration: 0.34,
-  cameraOffset: new THREE.Vector3(6.8, 6.8, 6.8),
+  cameraYawDeg: 45,
+  cameraPitchDeg: 40,
+  cameraDistance: 12.4,
+  cameraFov: 48,
+  cameraOffset: makeCameraOffset(45, 40, 12.4),
   cameraLerp: 7.5,
   cameraTargetHeight: 1.35,
   turnLerp: 10.5,
@@ -230,7 +246,7 @@ function createScene() {
 }
 
 function createCamera() {
-  const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(CONFIG.cameraFov, window.innerWidth / window.innerHeight, 0.1, 100);
   camera.position.copy(CONFIG.cameraOffset);
   camera.lookAt(0, CONFIG.cameraTargetHeight, 0);
   return camera;
