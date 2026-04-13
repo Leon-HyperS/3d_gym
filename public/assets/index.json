@@ -1,0 +1,458 @@
+{
+  "version": 1,
+  "generatedOn": "2026-04-12",
+  "assets": [
+    {
+      "id": "universal",
+      "displayName": "Universal Mannequin",
+      "path": "/assets/universal.glb",
+      "role": "primary_fighter_prototype",
+      "format": "glb",
+      "summary": "Self-contained humanoid GLB that is strong enough for a first-pass 3D fighting game prototype, training mode, animation calibration, and placeholder character blocking.",
+      "sourceFile": {
+        "sha256": "D867292451E432B735E2A910C2DB6640FBEA97B205D85A2E8FFED26DA87972CF",
+        "fileSizeBytes": 8114364,
+        "glbVersion": 2
+      },
+      "structure": {
+        "scenes": 1,
+        "nodes": 67,
+        "meshes": 1,
+        "meshNames": [
+          "Mannequin"
+        ],
+        "materials": 2,
+        "materialNames": [
+          "M_Main",
+          "M_Joints"
+        ],
+        "skins": 1,
+        "skinNames": [
+          "Armature"
+        ],
+        "textures": 1,
+        "images": 1,
+        "samplers": 1
+      },
+      "prototypeUtility": {
+        "bestUses": [
+          "Main playable fighter in a Tekken-like prototype",
+          "Training dummy or mirrored placeholder opponent via SkeletonUtils.clone()",
+          "Animation calibration pass before combat code hardens",
+          "Fallback NPC for interaction, staging, or menu blocking"
+        ],
+        "strengths": [
+          "Covers baseline locomotion, crouch, jump, hit reactions, death, and light melee punches",
+          "Includes root-motion variants for roll and sword attack, which are useful for advancing actions",
+          "Ships as a single GLB with one embedded texture, so browser loading is simple",
+          "Single skinned mesh keeps animation indexing and mixer setup straightforward"
+        ],
+        "limitations": [
+          "No explicit guard, sidestep, backdash, kick chain, throw, launcher, wake-up, or knockdown recovery clips",
+          "Only one visual identity is present, so early versus play will need cloning or mirroring",
+          "Pistol, swimming, driving, sitting, and repair clips are secondary to the fighting prototype"
+        ]
+      },
+      "recommendedFighterPrototype": {
+        "defaultIdle": "Idle_Loop",
+        "calibrationPose": "A_TPose",
+        "roundOneMoveSet": {
+          "walkForward": "Walk_Loop",
+          "jogForward": "Jog_Fwd_Loop",
+          "dashForward": "Sprint_Loop",
+          "crouchIdle": "Crouch_Idle_Loop",
+          "crouchAdvance": "Crouch_Fwd_Loop",
+          "jumpStart": "Jump_Start",
+          "jumpLoop": "Jump_Loop",
+          "jumpLand": "Jump_Land",
+          "jab": "Punch_Jab",
+          "cross": "Punch_Cross",
+          "advancingSpecial": "Sword_Attack_RM",
+          "evade": "Roll_RM",
+          "hitHigh": "Hit_Head",
+          "hitMid": "Hit_Chest",
+          "knockout": "Death01"
+        },
+        "implementationNotes": [
+          "Use exact clip names from this file instead of partial matching at runtime.",
+          "Treat Roll_RM and Sword_Attack_RM as opt-in root-motion clips and validate ring movement before binding them to combat.",
+          "Use SkeletonUtils.clone() for a second fighter or training dummy because the asset is skinned and animated.",
+          "Normalize the model from visible mesh bounds, not Box3.setFromObject(), to avoid floating caused by skeleton bones."
+        ]
+      },
+      "animationGroups": [
+        {
+          "id": "calibration",
+          "displayName": "Calibration / Debug",
+          "notes": "Useful before gameplay work to verify scale, facing, and bind pose.",
+          "clips": [
+            {
+              "id": "t_pose",
+              "sourceClipName": "A_TPose",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Bind-pose sanity check and retarget/debug reference."
+            }
+          ]
+        },
+        {
+          "id": "neutral_and_locomotion",
+          "displayName": "Neutral / Locomotion",
+          "notes": "High-value core set for a first playable fighting prototype.",
+          "clips": [
+            {
+              "id": "idle",
+              "sourceClipName": "Idle_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Default neutral stance."
+            },
+            {
+              "id": "walk_forward",
+              "sourceClipName": "Walk_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Slow forward movement."
+            },
+            {
+              "id": "walk_formal",
+              "sourceClipName": "Walk_Formal_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Optional stylized intro or menu walk."
+            },
+            {
+              "id": "jog_forward",
+              "sourceClipName": "Jog_Fwd_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Faster grounded advance."
+            },
+            {
+              "id": "sprint",
+              "sourceClipName": "Sprint_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Dash-style movement or run-in intro."
+            }
+          ]
+        },
+        {
+          "id": "crouch_jump_and_evasion",
+          "displayName": "Crouch / Jump / Evasion",
+          "notes": "Most of the core defensive motion for a small 3D fighter slice comes from this group.",
+          "clips": [
+            {
+              "id": "crouch_idle",
+              "sourceClipName": "Crouch_Idle_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Held crouch state."
+            },
+            {
+              "id": "crouch_forward",
+              "sourceClipName": "Crouch_Fwd_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Low-profile forward crawl or crouch approach."
+            },
+            {
+              "id": "jump_start",
+              "sourceClipName": "Jump_Start",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Ground takeoff."
+            },
+            {
+              "id": "jump_loop",
+              "sourceClipName": "Jump_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Airborne hold."
+            },
+            {
+              "id": "jump_land",
+              "sourceClipName": "Jump_Land",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Landing recovery."
+            },
+            {
+              "id": "roll_in_place",
+              "sourceClipName": "Roll",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Animation-only dodge or knockdown transition."
+            },
+            {
+              "id": "roll_root_motion",
+              "sourceClipName": "Roll_RM",
+              "loopSuggestion": "once",
+              "rootMotion": true,
+              "prototypeUse": "Advancing dodge after root-motion calibration."
+            }
+          ]
+        },
+        {
+          "id": "unarmed_combat",
+          "displayName": "Unarmed Combat / Reactions",
+          "notes": "These are the most directly useful combat clips for a fighting prototype.",
+          "clips": [
+            {
+              "id": "jab",
+              "sourceClipName": "Punch_Jab",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Fast light attack."
+            },
+            {
+              "id": "cross",
+              "sourceClipName": "Punch_Cross",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Heavier follow-up strike."
+            },
+            {
+              "id": "hit_head",
+              "sourceClipName": "Hit_Head",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "High hit reaction."
+            },
+            {
+              "id": "hit_chest",
+              "sourceClipName": "Hit_Chest",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Mid hit reaction."
+            },
+            {
+              "id": "death",
+              "sourceClipName": "Death01",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Round-end knockout."
+            }
+          ]
+        },
+        {
+          "id": "sword_combat",
+          "displayName": "Sword Combat",
+          "notes": "Not essential for a fist-first prototype, but useful as a temporary advancing special or weapon variant.",
+          "clips": [
+            {
+              "id": "sword_idle",
+              "sourceClipName": "Sword_Idle",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Weapon stance or stance-swap placeholder."
+            },
+            {
+              "id": "sword_attack",
+              "sourceClipName": "Sword_Attack",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "In-place special attack."
+            },
+            {
+              "id": "sword_attack_root_motion",
+              "sourceClipName": "Sword_Attack_RM",
+              "loopSuggestion": "once",
+              "rootMotion": true,
+              "prototypeUse": "Advancing special after root-motion verification."
+            }
+          ]
+        },
+        {
+          "id": "interaction_and_social",
+          "displayName": "Interaction / Social / Staging",
+          "notes": "Useful for menus, cutscenes, or non-combat staging but not core round-one fighting controls.",
+          "clips": [
+            {
+              "id": "idle_talking",
+              "sourceClipName": "Idle_Talking_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Dialogue or menu showcase."
+            },
+            {
+              "id": "idle_torch",
+              "sourceClipName": "Idle_Torch_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Prop hold or environmental idle."
+            },
+            {
+              "id": "interact",
+              "sourceClipName": "Interact",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Menu or world interaction placeholder."
+            },
+            {
+              "id": "pickup_table",
+              "sourceClipName": "PickUp_Table",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Object pickup staging."
+            },
+            {
+              "id": "push_loop",
+              "sourceClipName": "Push_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Heavy interaction or grapple placeholder."
+            },
+            {
+              "id": "fixing_kneeling",
+              "sourceClipName": "Fixing_Kneeling",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Repair or kneeling interact."
+            },
+            {
+              "id": "driving",
+              "sourceClipName": "Driving_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Vehicle or seated prop staging."
+            },
+            {
+              "id": "dance",
+              "sourceClipName": "Dance_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Victory pose, taunt stand-in, or menu flair."
+            },
+            {
+              "id": "sitting_enter",
+              "sourceClipName": "Sitting_Enter",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Seat transition."
+            },
+            {
+              "id": "sitting_idle",
+              "sourceClipName": "Sitting_Idle_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Seated idle."
+            },
+            {
+              "id": "sitting_exit",
+              "sourceClipName": "Sitting_Exit",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Seat exit transition."
+            },
+            {
+              "id": "sitting_talking",
+              "sourceClipName": "Sitting_Talking_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Seated dialogue or menu staging."
+            }
+          ]
+        },
+        {
+          "id": "magic_and_ranged",
+          "displayName": "Magic / Ranged",
+          "notes": "Good for future mode variants, supers, or experiments, but not needed for the first fighting loop.",
+          "clips": [
+            {
+              "id": "spell_enter",
+              "sourceClipName": "Spell_Simple_Enter",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Cast startup."
+            },
+            {
+              "id": "spell_idle",
+              "sourceClipName": "Spell_Simple_Idle_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Held casting stance."
+            },
+            {
+              "id": "spell_exit",
+              "sourceClipName": "Spell_Simple_Exit",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Cast stance recovery."
+            },
+            {
+              "id": "spell_shoot",
+              "sourceClipName": "Spell_Simple_Shoot",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Projectile or super placeholder."
+            },
+            {
+              "id": "pistol_idle",
+              "sourceClipName": "Pistol_Idle_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Ranged stance variant."
+            },
+            {
+              "id": "pistol_shoot",
+              "sourceClipName": "Pistol_Shoot",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Ranged attack placeholder."
+            },
+            {
+              "id": "pistol_reload",
+              "sourceClipName": "Pistol_Reload",
+              "loopSuggestion": "once",
+              "rootMotion": false,
+              "prototypeUse": "Reload or taunt stand-in."
+            },
+            {
+              "id": "pistol_aim_down",
+              "sourceClipName": "Pistol_Aim_Down",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Lower aim pose."
+            },
+            {
+              "id": "pistol_aim_neutral",
+              "sourceClipName": "Pistol_Aim_Neutral",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Straight aim pose."
+            },
+            {
+              "id": "pistol_aim_up",
+              "sourceClipName": "Pistol_Aim_Up",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "High aim pose."
+            }
+          ]
+        },
+        {
+          "id": "water",
+          "displayName": "Water",
+          "notes": "Not relevant to the initial fighting prototype, but useful if the asset is reused elsewhere.",
+          "clips": [
+            {
+              "id": "swim_idle",
+              "sourceClipName": "Swim_Idle_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Treading water."
+            },
+            {
+              "id": "swim_forward",
+              "sourceClipName": "Swim_Fwd_Loop",
+              "loopSuggestion": "repeat",
+              "rootMotion": false,
+              "prototypeUse": "Forward swim locomotion."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

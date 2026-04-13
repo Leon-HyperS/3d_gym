@@ -1,0 +1,41 @@
+{
+  "nano-banana-2-sprite-sheet": {
+    "provider": "gemini",
+    "family": "nano-banana-2",
+    "model": "gemini-3.1-flash-image-preview",
+    "defaults": {
+      "response_modalities": ["Image"],
+      "aspect_ratio": "4:1",
+      "image_size": "2K"
+    }
+  },
+  "nano-banana-2-edit": {
+    "provider": "gemini",
+    "family": "nano-banana-2",
+    "model": "gemini-3.1-flash-image-preview",
+    "defaults": {
+      "response_modalities": ["Image"],
+      "aspect_ratio": "4:1",
+      "image_size": "2K"
+    }
+  },
+  "nano-banana-pro-asset": {
+    "provider": "gemini",
+    "family": "nano-banana-pro",
+    "model": "gemini-3-pro-image-preview",
+    "defaults": {
+      "response_modalities": ["Image"],
+      "aspect_ratio": "1:1",
+      "image_size": "2K"
+    }
+  },
+  "nano-banana-fast-comp": {
+    "provider": "gemini",
+    "family": "nano-banana",
+    "model": "gemini-2.5-flash-image",
+    "defaults": {
+      "response_modalities": ["Image"],
+      "aspect_ratio": "1:1"
+    }
+  }
+}

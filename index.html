@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Debug Gym Prototype</title>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="ui" class="ui-shell">
+      <section class="panel panel--hero">
+        <p class="eyebrow">3D Fighting Prototype</p>
+        <h1>Debug Gym</h1>
+        <p class="copy">
+          Use the bare minimum training setup: one character, one floor, and a
+          mouse-driven crosshair for facing tests. The helpers on the right can
+          be toggled on and off live.
+        </p>
+        <div class="legend">
+          <span><strong>Mouse</strong> aim + face</span>
+          <span><strong>WASD</strong> run</span>
+          <span><strong>Shift</strong> hold to sprint</span>
+          <span><strong>Ctrl</strong> hold to crouch</span>
+          <span><strong>Space</strong> roll</span>
+          <span><strong>Q</strong> left punch</span>
+          <span><strong>E</strong> right punch</span>
+        </div>
+      </section>
+
+      <section class="panel panel--actions">
+        <h2>Quick Actions</h2>
+        <div class="button-row">
+          <button type="button" data-action="idle">Idle</button>
+          <button type="button" data-action="roll">Roll</button>
+          <button type="button" data-action="leftPunch">Left Punch</button>
+          <button type="button" data-action="rightPunch">Right Punch</button>
+          <button type="button" data-action="reset">Reset Position</button>
+        </div>
+      </section>
+
+      <section class="panel panel--status">
+        <h2>Runtime Status</h2>
+        <dl class="stats">
+          <div>
+            <dt>Active Clip</dt>
+            <dd id="status-clip">Loading</dd>
+          </div>
+          <div>
+            <dt>State</dt>
+            <dd id="status-state">Loading</dd>
+          </div>
+          <div>
+            <dt>Position</dt>
+            <dd id="status-position">0.00, 0.00, 0.00</dd>
+          </div>
+          <div>
+            <dt>Yaw Offset</dt>
+            <dd id="status-yaw">0 deg</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel panel--debug">
+        <div class="panel-head">
+          <h2>Debug Helpers</h2>
+          <button type="button" id="flip-facing">Flip Facing</button>
+        </div>
+        <div class="debug-grid">
+          <label><input type="checkbox" data-debug-toggle="grid" checked /> Grid</label>
+          <label><input type="checkbox" data-debug-toggle="axes" /> World Axes</label>
+          <label><input type="checkbox" data-debug-toggle="origin" checked /> Origin Marker</label>
+          <label><input type="checkbox" data-debug-toggle="bounds" /> Model Bounds</label>
+          <label><input type="checkbox" data-debug-toggle="skeleton" /> Skeleton</label>
+          <label><input type="checkbox" data-debug-toggle="vectors" checked /> Forward + Move Vectors</label>
+          <label><input type="checkbox" data-debug-toggle="hitboxes" /> Proxy Hitboxes</label>
+          <label><input type="checkbox" data-debug-toggle="orbit" /> Free Camera</label>
+        </div>
+        <p class="debug-note">
+          Turn on free camera to orbit around the mannequin while keeping the
+          rest of the debug overlays available.
+        </p>
+      </section>
+    </div>
+
+    <div id="mouse-crosshair" aria-hidden="true">
+      <div class="crosshair-ring"></div>
+      <div class="crosshair-line crosshair-line--h"></div>
+      <div class="crosshair-line crosshair-line--v"></div>
+      <div class="crosshair-dot"></div>
+    </div>
+    <div id="flash-overlay"></div>
+    <div id="toast-container" aria-live="polite"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

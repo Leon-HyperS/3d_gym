@@ -1,0 +1,8 @@
+Generate a single horizontal sprite sheet for a 2D game asset.
+One row only with equal slots.
+Same subject in every slot.
+Full body visible in every slot.
+Keep the silhouette, proportions, palette, and facing direction consistent.
+Show one action or state only.
+Background: flat chroma green #00FF00 only.
+No text, labels, borders, scenery, poster framing, or extra characters.
