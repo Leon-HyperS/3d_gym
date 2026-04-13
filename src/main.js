@@ -8,6 +8,7 @@ const CONFIG = {
   ringY: 0,
   heroHeight: 1.9,
   crouchSpeed: 1.35,
+  pistolMoveSpeed: 2.05,
   runSpeed: 4.15,
   sprintSpeed: 5.65,
   rollSpeed: 6.5,
@@ -21,14 +22,87 @@ const CONFIG = {
 
 const ACTIONS = {
   idle: "Idle_Loop",
+  walk: "Walk_Loop",
   run: "Jog_Fwd_Loop",
   sprint: "Sprint_Loop",
   crouchIdle: "Crouch_Idle_Loop",
   crouchMove: "Crouch_Fwd_Loop",
   roll: "Roll",
+  pistolStance: "Pistol_Idle_Loop",
   leftPunch: "Punch_Jab",
   rightPunch: "Punch_Cross",
 };
+
+const UPPER_BODY_NODES = new Set([
+  "spine_01",
+  "spine_02",
+  "spine_03",
+  "neck_01",
+  "Head",
+  "clavicle_l",
+  "upperarm_l",
+  "lowerarm_l",
+  "hand_l",
+  "thumb_01_l",
+  "thumb_02_l",
+  "thumb_03_l",
+  "thumb_04_leaf_l",
+  "index_01_l",
+  "index_02_l",
+  "index_03_l",
+  "index_04_leaf_l",
+  "middle_01_l",
+  "middle_02_l",
+  "middle_03_l",
+  "middle_04_leaf_l",
+  "ring_01_l",
+  "ring_02_l",
+  "ring_03_l",
+  "ring_04_leaf_l",
+  "pinky_01_l",
+  "pinky_02_l",
+  "pinky_03_l",
+  "pinky_04_leaf_l",
+  "clavicle_r",
+  "upperarm_r",
+  "lowerarm_r",
+  "hand_r",
+  "thumb_01_r",
+  "thumb_02_r",
+  "thumb_03_r",
+  "thumb_04_leaf_r",
+  "index_01_r",
+  "index_02_r",
+  "index_03_r",
+  "index_04_leaf_r",
+  "middle_01_r",
+  "middle_02_r",
+  "middle_03_r",
+  "middle_04_leaf_r",
+  "ring_01_r",
+  "ring_02_r",
+  "ring_03_r",
+  "ring_04_leaf_r",
+  "pinky_01_r",
+  "pinky_02_r",
+  "pinky_03_r",
+  "pinky_04_leaf_r",
+]);
+
+const LOWER_BODY_NODES = new Set([
+  "root",
+  "pelvis",
+  "thigh_l",
+  "calf_l",
+  "foot_l",
+  "ball_l",
+  "ball_leaf_l",
+  "thigh_r",
+  "calf_r",
+  "foot_r",
+  "ball_r",
+  "ball_leaf_r",
+]);
 
 const dom = {
   app: document.querySelector("#app"),
@@ -71,6 +145,7 @@ const runtime = {
     right: false,
     sprintModifier: false,
     crouchModifier: false,
+    pistolStance: false,
   },
   cameraTarget: new THREE.Vector3(0, 1.3, 0),
   cameraLookTarget: new THREE.Vector3(0, 1.3, 0),
@@ -129,7 +204,7 @@ async function init() {
   syncGroundedAnimation(runtime.hero, true);
   window.__TEST__.ready = true;
 
-  showToast("Debug Gym ready. WASD / Shift / Ctrl / Space", 2600);
+  showToast("Debug Gym ready. RMB / WASD / Shift / Ctrl / Space", 2600);
   runtime.clock.start();
   runtime.renderer.setAnimationLoop(updateFrame);
 }
@@ -321,6 +396,26 @@ function bindKeyboard() {
 }
 
 function bindPointer() {
+  window.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+
+  window.addEventListener("pointerdown", (event) => {
+    if (event.button === 2) {
+      runtime.input.pistolStance = true;
+    }
+  });
+
+  window.addEventListener("pointerup", (event) => {
+    if (event.button === 2) {
+      runtime.input.pistolStance = false;
+    }
+  });
+
+  window.addEventListener("pointercancel", () => {
+    runtime.input.pistolStance = false;
+  });
+
   window.addEventListener("pointermove", (event) => {
     const targetElement = event.target instanceof Element ? event.target : null;
     runtime.mouse.overUi = Boolean(targetElement?.closest(".panel"));
@@ -333,6 +428,10 @@ function bindPointer() {
 
   window.addEventListener("pointerenter", () => {
     dom.crosshair.style.opacity = runtime.mouse.overUi ? "0" : "1";
+  });
+
+  window.addEventListener("blur", () => {
+    runtime.input.pistolStance = false;
   });
 
   updatePointerFromClient(runtime.mouse.clientX, runtime.mouse.clientY);
@@ -402,18 +501,22 @@ async function loadHero(scene, asset) {
   scene.add(root);
 
   const mixer = new THREE.AnimationMixer(model);
+  const clips = new Map();
   const actions = new Map();
   for (const clip of gltf.animations) {
+    clips.set(clip.name, clip);
     actions.set(clip.name, mixer.clipAction(clip));
   }
 
   const requiredClips = [
     ACTIONS.idle,
+    ACTIONS.walk,
     ACTIONS.run,
     ACTIONS.sprint,
     ACTIONS.crouchIdle,
     ACTIONS.crouchMove,
     ACTIONS.roll,
+    ACTIONS.pistolStance,
     ACTIONS.leftPunch,
     ACTIONS.rightPunch,
   ];
@@ -425,16 +528,33 @@ async function loadHero(scene, asset) {
   }
 
   const helpers = createHeroDebugHelpers(scene, root, visualRoot, model);
+  const layeredClips = {
+    pistolUpper: createMaskedClip(clips.get(ACTIONS.pistolStance), UPPER_BODY_NODES, "PistolUpper"),
+    idleLower: createMaskedClip(clips.get(ACTIONS.idle), LOWER_BODY_NODES, "IdleLower"),
+    walkLower: createMaskedClip(clips.get(ACTIONS.walk), LOWER_BODY_NODES, "WalkLower"),
+  };
+  const layeredActions = {
+    pistolUpper: mixer.clipAction(layeredClips.pistolUpper),
+    idleLower: mixer.clipAction(layeredClips.idleLower),
+    walkLower: mixer.clipAction(layeredClips.walkLower),
+  };
 
   const hero = {
     root,
     visualRoot,
     model,
     mixer,
+    clips,
     actions,
+    layeredActions,
     helpers,
     currentAction: null,
+    currentUpperAction: null,
+    currentLowerAction: null,
     currentClip: ACTIONS.idle,
+    upperClip: null,
+    lowerClip: null,
+    animationMode: "full",
     grounded: true,
     actionLock: null,
     moveDirection: new THREE.Vector3(0, 0, 1),
@@ -463,6 +583,23 @@ async function loadHero(scene, asset) {
   });
 
   return hero;
+}
+
+function createMaskedClip(sourceClip, includedNodes, name) {
+  const tracks = sourceClip.tracks
+    .filter((track) => includedNodes.has(getTrackNodeName(track.name)))
+    .map((track) => track.clone());
+
+  if (tracks.length === 0) {
+    throw new Error(`Masked clip '${name}' has no tracks`);
+  }
+
+  return new THREE.AnimationClip(name, sourceClip.duration, tracks);
+}
+
+function getTrackNodeName(trackName) {
+  const dotIndex = trackName.indexOf(".");
+  return dotIndex === -1 ? trackName : trackName.slice(0, dotIndex);
 }
 
 function createHeroDebugHelpers(scene, root, visualRoot, model) {
@@ -1288,11 +1425,13 @@ function updateHero(dt) {
     hero.rollTimeLeft = Math.max(0, hero.rollTimeLeft - dt);
   } else if (moveStrength > 0) {
     hero.lastMoveDirection.copy(desiredMove);
-    const speed = runtime.input.crouchModifier
-      ? CONFIG.crouchSpeed
-      : runtime.input.sprintModifier
-        ? CONFIG.sprintSpeed
-        : CONFIG.runSpeed;
+    const speed = runtime.input.pistolStance
+      ? CONFIG.pistolMoveSpeed
+      : runtime.input.crouchModifier
+        ? CONFIG.crouchSpeed
+        : runtime.input.sprintModifier
+          ? CONFIG.sprintSpeed
+          : CONFIG.runSpeed;
     if (canMoveOnGround) {
       hero.root.position.addScaledVector(desiredMove, speed * dt);
     }
@@ -1418,7 +1557,11 @@ function updateStatusPanel() {
   dom.clip.textContent = hero.currentClip;
   dom.state.textContent = hero.actionLock
     ? hero.actionLock
-    : runtime.input.crouchModifier
+    : runtime.input.pistolStance
+      ? hero.moveDirection.lengthSq() > 0
+        ? "pistolWalk"
+        : "pistolStance"
+      : runtime.input.crouchModifier
       ? hero.moveDirection.lengthSq() > 0
         ? "crouchMove"
         : "crouchIdle"
@@ -1458,6 +1601,11 @@ function syncGroundedAnimation(hero, force = false) {
   }
 
   const moving = hero.moveDirection.lengthSq() > 0;
+  if (runtime.input.pistolStance) {
+    playLayeredPistol(hero, { moving, force });
+    return;
+  }
+
   const locomotionClip = runtime.input.crouchModifier
     ? moving
       ? ACTIONS.crouchMove
@@ -1472,6 +1620,64 @@ function syncGroundedAnimation(hero, force = false) {
     fade: 0.12,
     force,
   });
+}
+
+function playLayeredPistol(hero, { moving, force = false } = {}) {
+  const nextUpper = hero.layeredActions.pistolUpper;
+  const nextLower = moving ? hero.layeredActions.walkLower : hero.layeredActions.idleLower;
+
+  if (!force &&
+      hero.animationMode === "layered" &&
+      hero.currentUpperAction === nextUpper &&
+      hero.currentLowerAction === nextLower) {
+    if (!nextUpper.isRunning()) {
+      nextUpper.play();
+    }
+    if (!nextLower.isRunning()) {
+      nextLower.play();
+    }
+    hero.currentClip = moving ? `${ACTIONS.pistolStance} + ${ACTIONS.walk}` : `${ACTIONS.pistolStance} + ${ACTIONS.idle}`;
+    hero.upperClip = ACTIONS.pistolStance;
+    hero.lowerClip = moving ? ACTIONS.walk : ACTIONS.idle;
+    return;
+  }
+
+  if (hero.currentAction) {
+    hero.currentAction.fadeOut(0.1);
+    hero.currentAction = null;
+  }
+
+  if (hero.currentUpperAction && hero.currentUpperAction !== nextUpper) {
+    hero.currentUpperAction.fadeOut(0.08);
+  }
+
+  if (hero.currentLowerAction && hero.currentLowerAction !== nextLower) {
+    hero.currentLowerAction.fadeOut(0.08);
+  }
+
+  if (force || hero.currentUpperAction !== nextUpper || !nextUpper.isRunning()) {
+    configureLayerAction(nextUpper, { loop: true, fade: 0.08 });
+  }
+
+  if (force || hero.currentLowerAction !== nextLower || !nextLower.isRunning()) {
+    configureLayerAction(nextLower, { loop: true, fade: 0.08 });
+  }
+
+  hero.currentUpperAction = nextUpper;
+  hero.currentLowerAction = nextLower;
+  hero.animationMode = "layered";
+  hero.currentClip = moving ? `${ACTIONS.pistolStance} + ${ACTIONS.walk}` : `${ACTIONS.pistolStance} + ${ACTIONS.idle}`;
+  hero.upperClip = ACTIONS.pistolStance;
+  hero.lowerClip = moving ? ACTIONS.walk : ACTIONS.idle;
+}
+
+function configureLayerAction(action, { loop, fade }) {
+  action.reset();
+  action.enabled = true;
+  action.paused = false;
+  action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+  action.clampWhenFinished = !loop;
+  action.fadeIn(fade).play();
 }
 
 function requestRoll() {
@@ -1511,11 +1717,24 @@ function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, tim
     return null;
   }
 
+  if (hero.currentUpperAction) {
+    hero.currentUpperAction.fadeOut(fade);
+    hero.currentUpperAction = null;
+  }
+
+  if (hero.currentLowerAction) {
+    hero.currentLowerAction.fadeOut(fade);
+    hero.currentLowerAction = null;
+  }
+
   if (!force && hero.currentAction === nextAction) {
     if (!nextAction.isRunning()) {
       nextAction.play();
     }
     hero.currentClip = clipName;
+    hero.upperClip = null;
+    hero.lowerClip = null;
+    hero.animationMode = "full";
     return nextAction;
   }
 
@@ -1533,6 +1752,9 @@ function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, tim
 
   hero.currentAction = nextAction;
   hero.currentClip = clipName;
+  hero.upperClip = null;
+  hero.lowerClip = null;
+  hero.animationMode = "full";
   return nextAction;
 }
 
@@ -1560,6 +1782,7 @@ function clearMovementInput() {
   runtime.input.right = false;
   runtime.input.sprintModifier = false;
   runtime.input.crouchModifier = false;
+  runtime.input.pistolStance = false;
   if (runtime.hero) {
     runtime.hero.moveDirection.set(0, 0, 0);
   }
@@ -1640,8 +1863,12 @@ function getTestState() {
       z: tempWorldForward.z,
     },
     currentClip: runtime.hero.currentClip,
+    animationMode: runtime.hero.animationMode,
+    upperClip: runtime.hero.upperClip,
+    lowerClip: runtime.hero.lowerClip,
     sprintModifier: runtime.input.sprintModifier,
     crouchModifier: runtime.input.crouchModifier,
+    pistolStance: runtime.input.pistolStance,
     mouse: {
       x: runtime.mouse.clientX,
       y: runtime.mouse.clientY,
