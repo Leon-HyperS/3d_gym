@@ -30,6 +30,7 @@ const CONFIG = {
   rollExitFraction: 0.5,
   rollMinDuration: 0.22,
   rollMaxDuration: 0.34,
+  backFlipEndHoldSeconds: 0.08,
   cameraYawDeg: 45,
   cameraPitchDeg: 40,
   cameraDistance: 12.4,
@@ -73,6 +74,7 @@ const ACTIONS = {
   crouchLeft: "Crouch_Left_Loop",
   crouchRight: "Crouch_Right_Loop",
   roll: "Roll",
+  backFlip: "BackFlip",
   dodgeLeft: "Dodge_Left",
   dodgeRight: "Dodge_Right",
   pistolStance: "Pistol_Idle_Loop",
@@ -148,6 +150,7 @@ const LOWER_BODY_ACTION_KEYS = [
 const REQUIRED_ACTION_KEYS = [
   ...LOWER_BODY_ACTION_KEYS,
   "roll",
+  "backFlip",
   "dodgeLeft",
   "dodgeRight",
   "pistolStance",
@@ -944,6 +947,7 @@ async function loadHero(scene, asset) {
     rollDuration: rollClipDuration,
     rollExitDuration,
     rollTimeLeft: 0,
+    evadeRecoveryTimeLeft: 0,
     rollDirection: new THREE.Vector3(0, 0, 1),
   };
 
@@ -965,11 +969,13 @@ async function loadHero(scene, asset) {
 
     if (
       finishedClip === ACTIONS.roll ||
+      finishedClip === ACTIONS.backFlip ||
       finishedClip === ACTIONS.dodgeLeft ||
       finishedClip === ACTIONS.dodgeRight
     ) {
       hero.actionLock = null;
       hero.rollTimeLeft = 0;
+      hero.evadeRecoveryTimeLeft = 0;
       syncGroundedAnimation(hero, true);
     }
   });
@@ -1816,6 +1822,13 @@ function updateHero(dt) {
     hero.lastMoveDirection.copy(hero.rollDirection);
     hero.rollTimeLeft = Math.max(0, hero.rollTimeLeft - dt);
     if (hero.rollTimeLeft === 0) {
+      if (hero.evadeRecoveryTimeLeft === 0) {
+        finishRoll(hero);
+      }
+    }
+  } else if (isEvading && hero.evadeRecoveryTimeLeft > 0) {
+    hero.evadeRecoveryTimeLeft = Math.max(0, hero.evadeRecoveryTimeLeft - dt);
+    if (hero.evadeRecoveryTimeLeft === 0) {
       finishRoll(hero);
     }
   } else if (moveStrength > 0) {
@@ -2250,9 +2263,9 @@ function getEvadeSelection(hero) {
 
   if (runtime.input.back && !runtime.input.forward) {
     return {
-      clipName: ACTIONS.roll,
-      lockName: "backRoll",
-      label: "Back roll",
+      clipName: ACTIONS.backFlip,
+      lockName: "backFlip",
+      label: "Backflip",
       direction: tempEvadeDirection.copy(aimForward).multiplyScalar(-1),
     };
   }
@@ -2276,6 +2289,7 @@ function requestRoll() {
   hero.actionLock = evadeSelection.lockName;
   hero.upperBodyActionLock = null;
   hero.upperBodyRecoveryTimeLeft = 0;
+  hero.evadeRecoveryTimeLeft = evadeClipName === ACTIONS.backFlip ? CONFIG.backFlipEndHoldSeconds : 0;
   hero.rollDirection.copy(evadeSelection.direction).normalize();
   hero.lastMoveDirection.copy(hero.rollDirection);
 
@@ -2331,6 +2345,7 @@ function finishRoll(hero) {
 
   hero.actionLock = null;
   hero.rollTimeLeft = 0;
+  hero.evadeRecoveryTimeLeft = 0;
   syncGroundedAnimation(hero, true);
 }
 
@@ -2394,6 +2409,7 @@ function resetHeroTransform() {
   runtime.hero.upperBodyActionLock = null;
   runtime.hero.upperBodyRecoveryTimeLeft = 0;
   runtime.hero.rollTimeLeft = 0;
+  runtime.hero.evadeRecoveryTimeLeft = 0;
   runtime.hero.rollDirection.set(0, 0, 1);
   runtime.hero.lastMoveDirection.set(0, 0, 1);
   syncGroundedAnimation(runtime.hero, true);
