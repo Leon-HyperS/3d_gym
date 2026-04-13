@@ -21,6 +21,8 @@ const CONFIG = {
   heroHeight: 1.9,
   crouchSpeed: 1.35,
   pistolMoveSpeed: 2.05,
+  pistolShootRecoverySeconds: 0.1,
+  punchRecoverySeconds: 0.18,
   runSpeed: 4.15,
   sprintSpeed: 5.65,
   rollSpeed: 6.5,
@@ -37,21 +39,24 @@ const CONFIG = {
   cameraTargetHeight: 1.35,
   turnLerp: 10.5,
   baseYawOffset: 0,
-  aimBackClipThreshold: -0.45,
-  aimSideClipThreshold: 0.55,
-  aimStrafeForwardLimit: 0.35,
+  aimDirectionDeadZoneDeg: 22.5,
+  shortcutCloseGuardMs: 900,
   maxDelta: 0.05,
 };
 
 const ACTIONS = {
   idle: "Idle_Loop",
   walk: "Walk_Loop",
+  walkForwardLeft: "Walk_Fwd_Loop",
+  walkForwardRight: "Walk_Fwd_R_Loop",
   walkBack: "Walk_Bwd_Loop",
   walkBackLeft: "Walk_Bwd_L_Loop",
   walkBackRight: "Walk_Bwd_R_Loop",
   walkLeft: "Walk_L_Loop",
   walkRight: "Walk_R_Loop",
   run: "Jog_Fwd_Loop",
+  runForwardLeft: "Jog_Fwd_LeanL_Loop",
+  runForwardRight: "Jog_Fwd_LeanR_Loop",
   runBack: "Jog_Bwd_Loop",
   runBackLeft: "Jog_Bwd_L_Loop",
   runBackRight: "Jog_Bwd_R_Loop",
@@ -60,13 +65,19 @@ const ACTIONS = {
   sprint: "Sprint_Loop",
   crouchIdle: "Crouch_Idle_Loop",
   crouchMove: "Crouch_Fwd_Loop",
+  crouchForwardLeft: "Crouch_Fwd_L_Loop",
+  crouchForwardRight: "Crouch_Fwd_R_Loop",
   crouchBack: "Crouch_Bwd_Loop",
   crouchBackLeft: "Crouch_Bwd_L_Loop",
   crouchBackRight: "Crouch_Bwd_R_Loop",
   crouchLeft: "Crouch_Left_Loop",
   crouchRight: "Crouch_Right_Loop",
   roll: "Roll",
+  dodgeLeft: "Dodge_Left",
+  dodgeRight: "Dodge_Right",
   pistolStance: "Pistol_Idle_Loop",
+  pistolShoot: "Pistol_Shoot",
+  parry: "Idle_Shield_Break",
   leftPunch: "Punch_Jab",
   rightPunch: "Punch_Cross",
 };
@@ -74,6 +85,8 @@ const ACTIONS = {
 const DIRECTIONAL_ACTION_KEYS = {
   walk: {
     forward: "walk",
+    forwardLeft: "walkForwardLeft",
+    forwardRight: "walkForwardRight",
     back: "walkBack",
     backLeft: "walkBackLeft",
     backRight: "walkBackRight",
@@ -82,6 +95,8 @@ const DIRECTIONAL_ACTION_KEYS = {
   },
   run: {
     forward: "run",
+    forwardLeft: "runForwardLeft",
+    forwardRight: "runForwardRight",
     back: "runBack",
     backLeft: "runBackLeft",
     backRight: "runBackRight",
@@ -90,6 +105,8 @@ const DIRECTIONAL_ACTION_KEYS = {
   },
   crouch: {
     forward: "crouchMove",
+    forwardLeft: "crouchForwardLeft",
+    forwardRight: "crouchForwardRight",
     back: "crouchBack",
     backLeft: "crouchBackLeft",
     backRight: "crouchBackRight",
@@ -101,12 +118,16 @@ const DIRECTIONAL_ACTION_KEYS = {
 const LOWER_BODY_ACTION_KEYS = [
   "idle",
   "walk",
+  "walkForwardLeft",
+  "walkForwardRight",
   "walkBack",
   "walkBackLeft",
   "walkBackRight",
   "walkLeft",
   "walkRight",
   "run",
+  "runForwardLeft",
+  "runForwardRight",
   "runBack",
   "runBackLeft",
   "runBackRight",
@@ -115,6 +136,8 @@ const LOWER_BODY_ACTION_KEYS = [
   "sprint",
   "crouchIdle",
   "crouchMove",
+  "crouchForwardLeft",
+  "crouchForwardRight",
   "crouchBack",
   "crouchBackLeft",
   "crouchBackRight",
@@ -125,7 +148,11 @@ const LOWER_BODY_ACTION_KEYS = [
 const REQUIRED_ACTION_KEYS = [
   ...LOWER_BODY_ACTION_KEYS,
   "roll",
+  "dodgeLeft",
+  "dodgeRight",
   "pistolStance",
+  "pistolShoot",
+  "parry",
   "leftPunch",
   "rightPunch",
 ];
@@ -262,6 +289,7 @@ const runtime = {
     sprintModifier: false,
     crouchModifier: false,
     pistolStance: false,
+    parryModifier: false,
   },
   cameraTarget: new THREE.Vector3(0, 1.3, 0),
   cameraLookTarget: new THREE.Vector3(0, 1.3, 0),
@@ -273,6 +301,8 @@ const runtime = {
   },
   aimPoint: new THREE.Vector3(0, CONFIG.ringY, 4),
   lastStatusUpdate: 0,
+  closeGuardActive: false,
+  closeGuardTimeoutId: 0,
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -288,6 +318,7 @@ const tempScreenPoint = new THREE.Vector3();
 const tempWorldForward = new THREE.Vector3();
 const tempAimDirection = new THREE.Vector3();
 const tempAimRight = new THREE.Vector3();
+const tempEvadeDirection = new THREE.Vector3();
 
 window.__TEST__ = {
   ready: false,
@@ -405,13 +436,39 @@ function bindUi() {
   });
 }
 
+function shouldPreventBrowserShortcut(event) {
+  return (
+    ALWAYS_PREVENT_DEFAULT_CODES.has(event.code) ||
+    ((event.ctrlKey || event.metaKey) && CTRL_SHORTCUT_BLOCKED_CODES.has(event.code))
+  );
+}
+
+function clearCloseGuard() {
+  runtime.closeGuardActive = false;
+  if (runtime.closeGuardTimeoutId) {
+    window.clearTimeout(runtime.closeGuardTimeoutId);
+    runtime.closeGuardTimeoutId = 0;
+  }
+}
+
+function armCloseGuard() {
+  clearCloseGuard();
+  runtime.closeGuardActive = true;
+  runtime.closeGuardTimeoutId = window.setTimeout(() => {
+    runtime.closeGuardActive = false;
+    runtime.closeGuardTimeoutId = 0;
+  }, CONFIG.shortcutCloseGuardMs);
+}
+
 function bindKeyboard() {
   window.addEventListener("keydown", (event) => {
-    if (
-      ALWAYS_PREVENT_DEFAULT_CODES.has(event.code) ||
-      ((event.ctrlKey || event.metaKey) && CTRL_SHORTCUT_BLOCKED_CODES.has(event.code))
-    ) {
+    if (shouldPreventBrowserShortcut(event)) {
+      if ((event.ctrlKey || event.metaKey) && event.code === "KeyW") {
+        armCloseGuard();
+      }
       event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
     }
 
     if (event.repeat) {
@@ -457,7 +514,7 @@ function bindKeyboard() {
         resetHeroTransform();
         break;
       case "KeyF":
-        flipFacing();
+        runtime.input.parryModifier = true;
         break;
       case "Digit1":
         toggleDebugFlag("grid");
@@ -486,6 +543,16 @@ function bindKeyboard() {
       default:
         break;
     }
+  }, { capture: true });
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!runtime.closeGuardActive) {
+      return;
+    }
+
+    clearCloseGuard();
+    event.preventDefault();
+    event.returnValue = "";
   });
 
   window.addEventListener("keyup", (event) => {
@@ -514,6 +581,9 @@ function bindKeyboard() {
       case "ControlRight":
         runtime.input.crouchModifier = false;
         break;
+      case "KeyF":
+        runtime.input.parryModifier = false;
+        break;
       default:
         break;
     }
@@ -525,13 +595,24 @@ function bindPointer() {
     event.preventDefault();
   });
 
-  window.addEventListener("pointerdown", (event) => {
+  window.addEventListener("mousedown", (event) => {
+    const targetElement = event.target instanceof Element ? event.target : null;
+    const overUi = Boolean(targetElement?.closest(".panel"));
+    const rightMouseHeld = (event.buttons & 2) === 2 || runtime.input.pistolStance;
+
+    if (event.button === 0 && rightMouseHeld && !overUi) {
+      event.preventDefault();
+      requestPistolShoot();
+      return;
+    }
+
     if (event.button === 2) {
+      event.preventDefault();
       runtime.input.pistolStance = true;
     }
   });
 
-  window.addEventListener("pointerup", (event) => {
+  window.addEventListener("mouseup", (event) => {
     if (event.button === 2) {
       runtime.input.pistolStance = false;
     }
@@ -557,6 +638,7 @@ function bindPointer() {
 
   window.addEventListener("blur", () => {
     runtime.input.pistolStance = false;
+    runtime.input.parryModifier = false;
   });
 
   updatePointerFromClient(runtime.mouse.clientX, runtime.mouse.clientY);
@@ -791,7 +873,9 @@ async function loadHero(scene, asset) {
   const helpers = createHeroDebugHelpers(scene, root, visualRoot, model);
   const layeredClips = {
     upper: {
+      parry: createMaskedClip(clips.get(ACTIONS.parry), UPPER_BODY_NODES, "ParryUpper"),
       pistol: createMaskedClip(clips.get(ACTIONS.pistolStance), UPPER_BODY_NODES, "PistolUpper"),
+      pistolShoot: createMaskedClip(clips.get(ACTIONS.pistolShoot), UPPER_BODY_NODES, "PistolShootUpper"),
       leftPunch: createMaskedClip(clips.get(ACTIONS.leftPunch), UPPER_BODY_NODES, "PunchJabUpper"),
       rightPunch: createMaskedClip(clips.get(ACTIONS.rightPunch), UPPER_BODY_NODES, "PunchCrossUpper"),
     },
@@ -808,7 +892,9 @@ async function loadHero(scene, asset) {
   };
   const layeredActions = {
     upper: {
+      parry: mixer.clipAction(layeredClips.upper.parry),
       pistol: mixer.clipAction(layeredClips.upper.pistol),
+      pistolShoot: mixer.clipAction(layeredClips.upper.pistolShoot),
       leftPunch: mixer.clipAction(layeredClips.upper.leftPunch),
       rightPunch: mixer.clipAction(layeredClips.upper.rightPunch),
     },
@@ -847,6 +933,12 @@ async function loadHero(scene, asset) {
     grounded: true,
     actionLock: null,
     upperBodyActionLock: null,
+    upperBodyRecoveryTimeLeft: 0,
+    upperBodyRecoveryDurations: {
+      [ACTIONS.pistolShoot]: CONFIG.pistolShootRecoverySeconds,
+      [ACTIONS.leftPunch]: CONFIG.punchRecoverySeconds,
+      [ACTIONS.rightPunch]: CONFIG.punchRecoverySeconds,
+    },
     moveDirection: new THREE.Vector3(0, 0, 1),
     lastMoveDirection: new THREE.Vector3(0, 0, 1),
     rollDuration: rollClipDuration,
@@ -861,12 +953,21 @@ async function loadHero(scene, asset) {
       return;
     }
 
-    if (finishedClip === "PunchJabUpper" || finishedClip === "PunchCrossUpper") {
+    if (
+      finishedClip === "PistolShootUpper" ||
+      finishedClip === "PunchJabUpper" ||
+      finishedClip === "PunchCrossUpper"
+    ) {
+      hero.upperBodyRecoveryTimeLeft = 0;
       hero.upperBodyActionLock = null;
       syncGroundedAnimation(hero, true);
     }
 
-    if (finishedClip === ACTIONS.roll) {
+    if (
+      finishedClip === ACTIONS.roll ||
+      finishedClip === ACTIONS.dodgeLeft ||
+      finishedClip === ACTIONS.dodgeRight
+    ) {
       hero.actionLock = null;
       hero.rollTimeLeft = 0;
       syncGroundedAnimation(hero, true);
@@ -1706,11 +1807,11 @@ function updateHero(dt) {
   const desiredMove = getCameraRelativeMove();
   hero.moveDirection.copy(desiredMove);
 
-  const isRolling = hero.actionLock === "roll";
-  const canMoveOnGround = !isRolling;
+  const isEvading = Boolean(hero.actionLock);
+  const canMoveOnGround = !isEvading;
   const moveStrength = desiredMove.lengthSq();
 
-  if (isRolling && hero.rollTimeLeft > 0) {
+  if (isEvading && hero.rollTimeLeft > 0) {
     hero.root.position.addScaledVector(hero.rollDirection, CONFIG.rollSpeed * dt);
     hero.lastMoveDirection.copy(hero.rollDirection);
     hero.rollTimeLeft = Math.max(0, hero.rollTimeLeft - dt);
@@ -1731,7 +1832,14 @@ function updateHero(dt) {
     }
   }
 
-  if (!isRolling) {
+  if (hero.upperBodyActionLock && hero.upperBodyRecoveryTimeLeft > 0) {
+    hero.upperBodyRecoveryTimeLeft = Math.max(0, hero.upperBodyRecoveryTimeLeft - dt);
+    if (hero.upperBodyRecoveryTimeLeft === 0) {
+      hero.upperBodyActionLock = null;
+    }
+  }
+
+  if (!isEvading) {
     syncGroundedAnimation(hero);
   }
 }
@@ -1851,10 +1959,16 @@ function updateStatusPanel() {
   dom.clip.textContent = hero.currentClip;
   dom.state.textContent = hero.actionLock
     ? hero.actionLock
+    : hero.upperBodyActionLock === ACTIONS.pistolShoot
+      ? "pistolShoot"
     : hero.upperBodyActionLock === ACTIONS.leftPunch
       ? "leftPunch"
       : hero.upperBodyActionLock === ACTIONS.rightPunch
         ? "rightPunch"
+    : runtime.input.parryModifier
+      ? hero.moveDirection.lengthSq() > 0
+        ? "parryMove"
+        : "parry"
     : runtime.input.pistolStance
       ? hero.moveDirection.lengthSq() > 0
         ? "pistolWalk"
@@ -1916,27 +2030,31 @@ function getAimRelativeMoveDirection(hero) {
 
   const forwardDot = hero.moveDirection.dot(aimForward);
   const rightDot = hero.moveDirection.dot(tempAimRight);
+  const angleDeg = THREE.MathUtils.radToDeg(Math.atan2(rightDot, forwardDot));
+  const deadZone = CONFIG.aimDirectionDeadZoneDeg;
 
-  if (forwardDot <= CONFIG.aimBackClipThreshold) {
-    if (rightDot <= -CONFIG.aimSideClipThreshold) {
-      return "backLeft";
-    }
-    if (rightDot >= CONFIG.aimSideClipThreshold) {
-      return "backRight";
-    }
+  if (angleDeg >= -deadZone && angleDeg < deadZone) {
+    return "forward";
+  }
+  if (angleDeg >= deadZone && angleDeg < 90 - deadZone) {
+    return "forwardRight";
+  }
+  if (angleDeg >= 90 - deadZone && angleDeg < 90 + deadZone) {
+    return "right";
+  }
+  if (angleDeg >= 90 + deadZone && angleDeg < 180 - deadZone) {
+    return "backRight";
+  }
+  if (angleDeg >= 180 - deadZone || angleDeg < -(180 - deadZone)) {
     return "back";
   }
-
-  if (Math.abs(forwardDot) <= CONFIG.aimStrafeForwardLimit) {
-    if (rightDot <= -CONFIG.aimSideClipThreshold) {
-      return "left";
-    }
-    if (rightDot >= CONFIG.aimSideClipThreshold) {
-      return "right";
-    }
+  if (angleDeg >= -(180 - deadZone) && angleDeg < -(90 + deadZone)) {
+    return "backLeft";
   }
-
-  return "forward";
+  if (angleDeg >= -(90 + deadZone) && angleDeg < -(90 - deadZone)) {
+    return "left";
+  }
+  return "forwardLeft";
 }
 
 function getDirectionalActionKey(group, direction) {
@@ -1966,7 +2084,7 @@ function resolveLocomotionActionKey(hero) {
 }
 
 function syncGroundedAnimation(hero, force = false) {
-  if (!hero || !hero.grounded || hero.actionLock === "roll") {
+  if (!hero || !hero.grounded || hero.actionLock) {
     return;
   }
 
@@ -1978,6 +2096,19 @@ function syncGroundedAnimation(hero, force = false) {
       upperAction: upperLayer.action,
       upperClip: upperLayer.clip,
       upperLoop: false,
+      lowerAction: lowerLayer.action,
+      lowerClip: lowerLayer.clip,
+      force,
+    });
+    return;
+  }
+
+  if (runtime.input.parryModifier) {
+    const lowerLayer = getLowerBodyLayer(hero, locomotionActionKey);
+    playLayeredState(hero, {
+      upperAction: hero.layeredActions.upper.parry,
+      upperClip: ACTIONS.parry,
+      upperLoop: true,
       lowerAction: lowerLayer.action,
       lowerClip: lowerLayer.clip,
       force,
@@ -2007,6 +2138,13 @@ function syncGroundedAnimation(hero, force = false) {
 }
 
 function getUpperBodyLayer(hero) {
+  if (hero.upperBodyActionLock === ACTIONS.pistolShoot) {
+    return {
+      action: hero.layeredActions.upper.pistolShoot,
+      clip: ACTIONS.pistolShoot,
+    };
+  }
+
   if (hero.upperBodyActionLock === ACTIONS.leftPunch) {
     return {
       action: hero.layeredActions.upper.leftPunch,
@@ -2088,43 +2226,106 @@ function configureLayerAction(action, { loop, fade }) {
   action.fadeIn(fade).play();
 }
 
+function getEvadeSelection(hero) {
+  const aimForward = getAimForwardVector(hero);
+  tempAimRight.crossVectors(aimForward, UP).normalize();
+
+  if (runtime.input.left && !runtime.input.right) {
+    return {
+      clipName: ACTIONS.dodgeLeft,
+      lockName: "dodgeLeft",
+      label: "Dodge left",
+      direction: tempEvadeDirection.copy(tempAimRight).multiplyScalar(-1),
+    };
+  }
+
+  if (runtime.input.right && !runtime.input.left) {
+    return {
+      clipName: ACTIONS.dodgeRight,
+      lockName: "dodgeRight",
+      label: "Dodge right",
+      direction: tempEvadeDirection.copy(tempAimRight),
+    };
+  }
+
+  if (runtime.input.back && !runtime.input.forward) {
+    return {
+      clipName: ACTIONS.roll,
+      lockName: "backRoll",
+      label: "Back roll",
+      direction: tempEvadeDirection.copy(aimForward).multiplyScalar(-1),
+    };
+  }
+
+  return {
+    clipName: ACTIONS.roll,
+    lockName: "roll",
+    label: "Roll",
+    direction: tempEvadeDirection.copy(aimForward),
+  };
+}
+
 function requestRoll() {
   const hero = runtime.hero;
   if (!hero || !hero.grounded || hero.actionLock) {
     return;
   }
 
-  hero.actionLock = "roll";
+  const evadeSelection = getEvadeSelection(hero);
+  const evadeClipName = evadeSelection.clipName;
+  hero.actionLock = evadeSelection.lockName;
   hero.upperBodyActionLock = null;
-  hero.rollTimeLeft = hero.rollExitDuration;
-  hero.rollDirection.set(
-    Math.sin(hero.root.rotation.y),
-    0,
-    Math.cos(hero.root.rotation.y),
-  ).normalize();
+  hero.upperBodyRecoveryTimeLeft = 0;
+  hero.rollDirection.copy(evadeSelection.direction).normalize();
   hero.lastMoveDirection.copy(hero.rollDirection);
-  playClip(hero, ACTIONS.roll, {
+
+  const evadeClipDuration = hero.actions.get(evadeClipName).getClip().duration / CONFIG.rollPlaybackSpeed;
+  hero.rollDuration = evadeClipDuration;
+  hero.rollTimeLeft = THREE.MathUtils.clamp(
+    evadeClipDuration * CONFIG.rollExitFraction,
+    CONFIG.rollMinDuration,
+    CONFIG.rollMaxDuration,
+  );
+
+  playClip(hero, evadeClipName, {
     loop: false,
     fade: 0.04,
     force: true,
     timeScale: CONFIG.rollPlaybackSpeed,
   });
-  showToast("Roll");
+  showToast(evadeSelection.label);
 }
 
-function requestPunch(clipName, label) {
+function requestUpperBodyAction(clipName, label, { requiresPistolStance = false } = {}) {
   const hero = runtime.hero;
-  if (!hero || !hero.grounded || hero.actionLock || hero.upperBodyActionLock) {
+  if (
+    !hero ||
+    !hero.grounded ||
+    hero.actionLock ||
+    hero.upperBodyActionLock ||
+    (requiresPistolStance && !runtime.input.pistolStance)
+  ) {
     return;
   }
 
   hero.upperBodyActionLock = clipName;
+  hero.upperBodyRecoveryTimeLeft = hero.upperBodyRecoveryDurations[clipName] ?? 0;
   syncGroundedAnimation(hero, true);
   showToast(label);
 }
 
+function requestPunch(clipName, label) {
+  requestUpperBodyAction(clipName, label);
+}
+
+function requestPistolShoot() {
+  requestUpperBodyAction(ACTIONS.pistolShoot, "Pistol shot", {
+    requiresPistolStance: true,
+  });
+}
+
 function finishRoll(hero) {
-  if (!hero || hero.actionLock !== "roll") {
+  if (!hero || !hero.actionLock) {
     return;
   }
 
@@ -2191,6 +2392,7 @@ function resetHeroTransform() {
   runtime.hero.grounded = true;
   runtime.hero.actionLock = null;
   runtime.hero.upperBodyActionLock = null;
+  runtime.hero.upperBodyRecoveryTimeLeft = 0;
   runtime.hero.rollTimeLeft = 0;
   runtime.hero.rollDirection.set(0, 0, 1);
   runtime.hero.lastMoveDirection.set(0, 0, 1);
@@ -2206,6 +2408,7 @@ function clearMovementInput() {
   runtime.input.sprintModifier = false;
   runtime.input.crouchModifier = false;
   runtime.input.pistolStance = false;
+  runtime.input.parryModifier = false;
   if (runtime.hero) {
     runtime.hero.moveDirection.set(0, 0, 0);
   }
@@ -2295,6 +2498,7 @@ function getTestState() {
     sprintModifier: runtime.input.sprintModifier,
     crouchModifier: runtime.input.crouchModifier,
     pistolStance: runtime.input.pistolStance,
+    parryModifier: runtime.input.parryModifier,
     mouse: {
       x: runtime.mouse.clientX,
       y: runtime.mouse.clientY,
