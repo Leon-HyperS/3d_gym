@@ -37,4 +37,18 @@ Original prompt: inspect the repo and understands how the assets are being lever
 - Verified the project still builds successfully with `npm.cmd run build` after the socket rewrite; the pre-existing missing texture warning for `Textures/colormap.png` on `blaster-a.glb` remains.
 - Increased the pistol `meshOffset.scale` from `0.24` to `0.32` on all axes after user feedback that the socketed prop still read too small in-hand; the socket position/rotation stayed unchanged.
 - Flipped the pistol barrel direction by setting `attachments.pistol.meshOffset.rotationDeg.y = 180`, preserving the calibrated `weapon_socket_r` socket transform while reversing the authored pistol mesh forward axis.
+- Continued from the user's newer pistol mesh-offset calibration already on disk (`position: { x: 0, y: 0.035, z: 0.1 }`, `rotationDeg: { x: 0, y: -90, z: 0 }`, `scale: 2` on all axes) instead of restoring the older baseline.
+- Added a reusable attachment `aiming` block to `attachments.pistol` with `enabled: true`, `forwardAxis: "+x"`, and `upAxis: "+y"` so the weapon can track the same world-space `aimPoint` used by the crosshair.
+- Split the runtime weapon attachment hierarchy into `socket -> gripRoot -> aimPivot -> meshRoot -> model`, which keeps the grip fit fixed in the hand while letting only the aiming pivot rotate toward the crosshair target.
+- Added a per-frame `syncWeaponAim()` pass that converts the crosshair target into the aim pivot parent's local space and rotates the pistol aim pivot so the configured barrel axis points at the crosshair target without changing the socket transform.
+- Added aim debug data to `window.__TEST__.getState()`, including `aimPivotRotationDeg`, `aimForwardAxis`, `aimUpAxis`, and `aimAlignmentDot`.
+- Live Playwright verification after the aim-pivot rewrite showed `pistolAttachment.aimAlignmentDot` at essentially `1.0`, meaning the measured barrel axis and the vector from the weapon pivot to `aimPoint` now coincide.
+- Follow-up fix for hand anchoring: simplified the aiming behavior to horizontal-only yaw and reordered the attachment chain to `socket -> aimPivot -> meshRoot -> model` so the hand/socket remains the direct parent of the aiming pivot and the pistol fit transform stays underneath it.
+- Added `attachments.pistol.aiming.horizontalOnly = true` so the pistol no longer pitches toward the floor-plane crosshair; it only yaws horizontally.
+- Updated debug alignment checks so `aimAlignmentDot` is measured against the horizontal projected aim vector when `horizontalOnly` is active.
+- Live verification with left and right off-center aims confirmed `aimPivotOffsetFromSocket = 0` in both cases, proving the aim pivot stays exactly on the hand socket while aiming, and `aimAlignmentDot` remained effectively `1.0`.
+- Final glue-to-hand fix: removed the remaining pistol-relative horizontal correction and instead drive the character root yaw from the weapon's horizontal aim line when in pistol stance.
+- `syncAttachmentAim()` now keeps the pistol `aimPivot` at identity when `horizontalOnly` is active, so the weapon no longer rotates independently inside the hand.
+- Added `getWeaponDrivenTargetYaw()` so pistol stance facing is solved from the socket/weapon forward offset and the crosshair target, giving horizontal crosshair alignment without moving the gun away from the hand.
+- Live verification after the weapon-driven yaw change showed `aimPivotRotationDeg` stayed exactly `{ x: 0, y: 0, z: 0 }`, `aimPivotOffsetFromSocket` stayed `0`, and `aimAlignmentDot` remained effectively `1.0` for both left and right off-center aims.
 

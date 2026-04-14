@@ -334,6 +334,13 @@ const tempWorldForward = new THREE.Vector3();
 const tempAimDirection = new THREE.Vector3();
 const tempAimRight = new THREE.Vector3();
 const tempEvadeDirection = new THREE.Vector3();
+const tempAttachmentAimOrigin = new THREE.Vector3();
+const tempAttachmentAimDirection = new THREE.Vector3();
+const tempAttachmentAimUp = new THREE.Vector3();
+const tempAttachmentProjectedForward = new THREE.Vector3();
+const tempAttachmentProjectedUp = new THREE.Vector3();
+const tempAttachmentProjectedDesiredUp = new THREE.Vector3();
+const tempAttachmentCross = new THREE.Vector3();
 
 window.__TEST__ = {
   ready: false,
@@ -844,6 +851,51 @@ function normalizeAttachmentMeshOffset(key, meshOffset) {
   };
 }
 
+function normalizeAxisLabel(value, label, fallback) {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  if (!["-x", "+x", "-y", "+y", "-z", "+z"].includes(normalized)) {
+    throw new Error(`${label} must be one of +x, -x, +y, -y, +z, -z`);
+  }
+  return normalized;
+}
+
+function normalizeAttachmentAiming(key, aiming) {
+  if (aiming == null) {
+    return {
+      enabled: false,
+      forwardAxis: "+z",
+      upAxis: "+y",
+      horizontalOnly: false,
+    };
+  }
+
+  if (typeof aiming !== "object" || Array.isArray(aiming)) {
+    throw new Error(`Attachment '${key}' aiming must be an object`);
+  }
+
+  const forwardAxis = normalizeAxisLabel(
+    aiming.forwardAxis,
+    `Attachment '${key}' aiming.forwardAxis`,
+    "+z",
+  );
+  const upAxis = normalizeAxisLabel(
+    aiming.upAxis,
+    `Attachment '${key}' aiming.upAxis`,
+    "+y",
+  );
+
+  if (forwardAxis.slice(1) === upAxis.slice(1)) {
+    throw new Error(`Attachment '${key}' aiming forwardAxis and upAxis must use different axes`);
+  }
+
+  return {
+    enabled: aiming.enabled !== false,
+    forwardAxis,
+    upAxis,
+    horizontalOnly: aiming.horizontalOnly === true,
+  };
+}
+
 function normalizeSocketAttachmentDefinition(key, attachment) {
   if (!attachment?.path) {
     throw new Error(`Attachment '${key}' is missing a path`);
@@ -858,6 +910,7 @@ function normalizeSocketAttachmentDefinition(key, attachment) {
     path: attachment.path,
     socket: normalizeSocketDefinition(key, attachment.socket),
     meshOffset: normalizeAttachmentMeshOffset(key, attachment.meshOffset),
+    aiming: normalizeAttachmentAiming(key, attachment.aiming),
   };
 }
 
@@ -1206,6 +1259,7 @@ async function loadHero(scene, asset) {
   });
 
   syncPistolVisibility(hero);
+  syncWeaponAim(hero);
   return hero;
 }
 
@@ -1375,6 +1429,107 @@ function prepareAttachmentModel(root) {
   });
 }
 
+function setVectorFromAxisLabel(label, target = new THREE.Vector3()) {
+  const sign = label.startsWith("-") ? -1 : 1;
+  target.set(0, 0, 0);
+  if (label.endsWith("x")) {
+    target.x = sign;
+  } else if (label.endsWith("y")) {
+    target.y = sign;
+  } else {
+    target.z = sign;
+  }
+  return target;
+}
+
+function orientObjectAxisTowardDirection(
+  object,
+  localForward,
+  localUp,
+  desiredDirection,
+  desiredUp = UP,
+) {
+  tempQuaternion.setFromUnitVectors(localForward, desiredDirection);
+
+  tempAttachmentProjectedUp.copy(localUp).applyQuaternion(tempQuaternion);
+  tempAttachmentProjectedUp.addScaledVector(
+    desiredDirection,
+    -tempAttachmentProjectedUp.dot(desiredDirection),
+  );
+
+  tempAttachmentProjectedDesiredUp.copy(desiredUp);
+  tempAttachmentProjectedDesiredUp.addScaledVector(
+    desiredDirection,
+    -tempAttachmentProjectedDesiredUp.dot(desiredDirection),
+  );
+
+  if (
+    tempAttachmentProjectedUp.lengthSq() < 0.000001 ||
+    tempAttachmentProjectedDesiredUp.lengthSq() < 0.000001
+  ) {
+    object.quaternion.copy(tempQuaternion);
+    return;
+  }
+
+  tempAttachmentProjectedUp.normalize();
+  tempAttachmentProjectedDesiredUp.normalize();
+
+  const dot = THREE.MathUtils.clamp(
+    tempAttachmentProjectedUp.dot(tempAttachmentProjectedDesiredUp),
+    -1,
+    1,
+  );
+  const twistAngle = Math.acos(dot);
+  tempAttachmentCross.crossVectors(
+    tempAttachmentProjectedUp,
+    tempAttachmentProjectedDesiredUp,
+  );
+  const twistSign = tempAttachmentCross.dot(desiredDirection) < 0 ? -1 : 1;
+
+  tempTargetQuaternion.setFromAxisAngle(desiredDirection, twistAngle * twistSign);
+  object.quaternion.copy(tempTargetQuaternion).multiply(tempQuaternion);
+}
+
+function orientObjectAxisHorizontallyTowardDirection(
+  object,
+  localForward,
+  desiredDirection,
+  localUpAxis,
+) {
+  tempAttachmentProjectedForward.copy(localForward);
+  tempAttachmentProjectedForward.addScaledVector(
+    localUpAxis,
+    -tempAttachmentProjectedForward.dot(localUpAxis),
+  );
+  tempAttachmentProjectedDesiredUp.copy(desiredDirection);
+  tempAttachmentProjectedDesiredUp.addScaledVector(
+    localUpAxis,
+    -tempAttachmentProjectedDesiredUp.dot(localUpAxis),
+  );
+
+  if (
+    tempAttachmentProjectedForward.lengthSq() < 0.000001 ||
+    tempAttachmentProjectedDesiredUp.lengthSq() < 0.000001
+  ) {
+    return;
+  }
+
+  tempAttachmentProjectedForward.normalize();
+  tempAttachmentProjectedDesiredUp.normalize();
+  const dot = THREE.MathUtils.clamp(
+    tempAttachmentProjectedForward.dot(tempAttachmentProjectedDesiredUp),
+    -1,
+    1,
+  );
+  const angle = Math.acos(dot);
+  tempAttachmentCross.crossVectors(
+    tempAttachmentProjectedForward,
+    tempAttachmentProjectedDesiredUp,
+  );
+  const sign = tempAttachmentCross.dot(localUpAxis) < 0 ? -1 : 1;
+  object.quaternion.setFromAxisAngle(localUpAxis, angle * sign);
+}
+
 function getNamedChild(parent, name) {
   return parent.children.find((child) => child.name === name) ?? null;
 }
@@ -1431,15 +1586,30 @@ function ensureAttachmentSocket(model, socketConfig) {
 function createPropAttachment(model, key, attachment, sourceScene) {
   const { parentBone, socket } = ensureAttachmentSocket(model, attachment.socket);
 
+  const aimPivot = new THREE.Group();
+  aimPivot.name = `${key.charAt(0).toUpperCase()}${key.slice(1)}AimPivot`;
+
   const meshRoot = new THREE.Group();
   meshRoot.name = `${key.charAt(0).toUpperCase()}${key.slice(1)}MeshRoot`;
+  // Keep the weapon fit transform under the aim pivot so the grip stays anchored in the hand.
   applyTransformToObject3D(meshRoot, attachment.meshOffset);
+
   const root = sourceScene.clone(true);
   root.name = `${socket.name}Model`;
   prepareAttachmentModel(root);
   root.visible = false;
 
-  socket.add(meshRoot);
+  const aimLocalForward = setVectorFromAxisLabel(
+    attachment.aiming.forwardAxis,
+    new THREE.Vector3(),
+  ).applyQuaternion(meshRoot.quaternion).normalize();
+  const aimLocalUp = setVectorFromAxisLabel(
+    attachment.aiming.upAxis,
+    new THREE.Vector3(),
+  ).applyQuaternion(meshRoot.quaternion).normalize();
+
+  socket.add(aimPivot);
+  aimPivot.add(meshRoot);
   meshRoot.add(root);
   socket.updateMatrixWorld(true);
 
@@ -1448,7 +1618,10 @@ function createPropAttachment(model, key, attachment, sourceScene) {
     config: attachment,
     parentBone,
     socket,
+    aimPivot,
     meshRoot,
+    aimLocalForward,
+    aimLocalUp,
     root,
   };
 }
@@ -2126,6 +2299,7 @@ function updateFrame() {
   runtime.hero.mixer.update(dt);
   updateAimTarget(dt);
   updateHero(dt);
+  syncWeaponAim(runtime.hero);
   updateStageTracking();
   updateCamera(dt);
   updateDebugHelpers();
@@ -2219,8 +2393,101 @@ function updateAimTarget(dt) {
   runtime.aimPoint.y = CONFIG.ringY + 0.02;
   runtime.world.crosshair.position.copy(runtime.aimPoint);
 
-  const targetYaw = Math.atan2(tempVector.x, tempVector.z);
+  let targetYaw = Math.atan2(tempVector.x, tempVector.z);
+  const pistolYawTarget = getWeaponDrivenTargetYaw(runtime.hero, runtime.hero.attachments?.pistol, runtime.aimPoint);
+  if (runtime.input.pistolStance && pistolYawTarget != null) {
+    targetYaw = pistolYawTarget;
+  }
   runtime.hero.root.rotation.y = dampAngle(runtime.hero.root.rotation.y, targetYaw, CONFIG.turnLerp, dt);
+}
+
+function getWeaponDrivenTargetYaw(hero, attachment, targetPoint) {
+  if (!attachment?.config.aiming?.enabled || !attachment.config.aiming.horizontalOnly) {
+    return null;
+  }
+
+  attachment.socket.getWorldPosition(tempAttachmentAimOrigin);
+  tempAttachmentAimDirection.subVectors(targetPoint, tempAttachmentAimOrigin);
+  tempAttachmentAimDirection.y = 0;
+  if (tempAttachmentAimDirection.lengthSq() < 0.0001) {
+    return null;
+  }
+  tempAttachmentAimDirection.normalize();
+
+  setVectorFromAxisLabel(
+    attachment.config.aiming.forwardAxis,
+    tempVector,
+  )
+    .applyQuaternion(attachment.meshRoot.getWorldQuaternion(tempQuaternion))
+    .normalize();
+  tempVector.y = 0;
+  if (tempVector.lengthSq() < 0.0001) {
+    return null;
+  }
+  tempVector.normalize();
+
+  const desiredWeaponYaw = Math.atan2(tempAttachmentAimDirection.x, tempAttachmentAimDirection.z);
+  const currentWeaponYaw = Math.atan2(tempVector.x, tempVector.z);
+  const weaponToRootYawOffset = Math.atan2(
+    Math.sin(currentWeaponYaw - hero.root.rotation.y),
+    Math.cos(currentWeaponYaw - hero.root.rotation.y),
+  );
+  return desiredWeaponYaw - weaponToRootYawOffset;
+}
+
+function syncAttachmentAim(attachment, targetPoint) {
+  if (!attachment?.config.aiming?.enabled) {
+    return;
+  }
+
+  if (attachment.config.aiming.horizontalOnly) {
+    attachment.aimPivot.quaternion.identity();
+    return;
+  }
+
+  attachment.aimPivot.getWorldPosition(tempAttachmentAimOrigin);
+  tempAttachmentAimDirection.subVectors(targetPoint, tempAttachmentAimOrigin);
+  if (tempAttachmentAimDirection.lengthSq() < 0.0001) {
+    return;
+  }
+
+  if (attachment.config.aiming.horizontalOnly) {
+    tempAttachmentAimDirection.y = 0;
+    if (tempAttachmentAimDirection.lengthSq() < 0.0001) {
+      return;
+    }
+  }
+
+  attachment.aimPivot.parent.getWorldQuaternion(tempQuaternion).invert();
+  tempAttachmentAimDirection.normalize();
+  tempAttachmentAimDirection.applyQuaternion(tempQuaternion).normalize();
+  tempAttachmentAimUp.copy(UP).applyQuaternion(tempQuaternion).normalize();
+  if (attachment.config.aiming.horizontalOnly) {
+    orientObjectAxisHorizontallyTowardDirection(
+      attachment.aimPivot,
+      attachment.aimLocalForward,
+      tempAttachmentAimDirection,
+      tempAttachmentAimUp,
+    );
+    return;
+  }
+
+  orientObjectAxisTowardDirection(
+    attachment.aimPivot,
+    attachment.aimLocalForward,
+    attachment.aimLocalUp,
+    tempAttachmentAimDirection,
+    tempAttachmentAimUp,
+  );
+}
+
+function syncWeaponAim(hero) {
+  const pistolAttachment = hero?.attachments?.pistol;
+  if (!pistolAttachment) {
+    return;
+  }
+
+  syncAttachmentAim(pistolAttachment, runtime.aimPoint);
 }
 
 function updateStageTracking() {
@@ -2839,6 +3106,32 @@ function getTestState() {
   }
 
   runtime.hero.model.getWorldDirection(tempWorldForward);
+  let pistolAimAlignmentDot = null;
+  if (runtime.hero.attachments?.pistol?.config.aiming?.enabled) {
+    const pistolAttachment = runtime.hero.attachments.pistol;
+    pistolAttachment.aimPivot.getWorldPosition(tempAttachmentAimOrigin);
+    tempAttachmentAimDirection.subVectors(runtime.aimPoint, tempAttachmentAimOrigin);
+    if (pistolAttachment.config.aiming.horizontalOnly) {
+      tempAttachmentAimDirection.y = 0;
+    }
+    if (tempAttachmentAimDirection.lengthSq() >= 0.0001) {
+      tempAttachmentAimDirection.normalize();
+      setVectorFromAxisLabel(
+        pistolAttachment.config.aiming.forwardAxis,
+        tempVector,
+      )
+        .applyQuaternion(pistolAttachment.meshRoot.getWorldQuaternion(tempQuaternion))
+        .normalize();
+      if (pistolAttachment.config.aiming.horizontalOnly) {
+        tempVector.y = 0;
+        if (tempVector.lengthSq() >= 0.0001) {
+          tempVector.normalize();
+        }
+      }
+      pistolAimAlignmentDot = tempVector.dot(tempAttachmentAimDirection);
+    }
+  }
+
   return {
     ready: true,
     heroPosition: {
@@ -2880,12 +3173,17 @@ function getTestState() {
             z: runtime.hero.attachments.pistol.socket.position.z,
           },
           socketLocalRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.socket.rotation),
+          aimPivotRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.aimPivot.rotation),
           meshOffsetPosition: {
             x: runtime.hero.attachments.pistol.meshRoot.position.x,
             y: runtime.hero.attachments.pistol.meshRoot.position.y,
             z: runtime.hero.attachments.pistol.meshRoot.position.z,
           },
           meshOffsetRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.meshRoot.rotation),
+          aimForwardAxis: runtime.hero.attachments.pistol.config.aiming.forwardAxis,
+          aimUpAxis: runtime.hero.attachments.pistol.config.aiming.upAxis,
+          horizontalOnlyAim: runtime.hero.attachments.pistol.config.aiming.horizontalOnly,
+          aimAlignmentDot: pistolAimAlignmentDot,
           meshAxisCorrectionApplied:
             Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.x) > 0.0001 ||
             Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.y) > 0.0001 ||

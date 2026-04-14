@@ -498,7 +498,13 @@
               "z": 2
             }
           },
-          "notes": "Attach through the dedicated right-hand weapon socket. The socket defines the grip orientation in hand space; the mesh offset remains identity except for scale because the pistol GLB already uses a usable local barrel/grip axis layout."
+          "aiming": {
+            "enabled": true,
+            "forwardAxis": "+x",
+            "upAxis": "+y",
+            "horizontalOnly": true
+          },
+          "notes": "Attach through the dedicated right-hand weapon socket. The socket defines the grip orientation in hand space, the mesh offset calibrates the prop fit, and the aim pivot rotates the barrel axis toward the world-space crosshair target."
         }
       },
       "prototypeUtility": {
