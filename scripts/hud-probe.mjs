@@ -68,7 +68,7 @@ try {
   assert.equal(initial.menusHidden, false, "menus should start visible");
   assert.equal(initial.hud.packId, "scifi_hud", "hud should use the sci-fi ui pack");
   assert.equal(initial.hudText.health, "86%", "health HUD should render the demo value");
-  assert.equal(initial.hudText.stamina, "63%", "stamina HUD should render the demo value");
+  assert.equal(initial.hudText.stamina, "100%", "stamina HUD should start full");
   assert.equal(initial.hudText.slotCount, 5, "HUD should render five slots");
   assert.equal(initial.uiShell?.hiddenClass, false, "menu shell should start visible");
   assert.equal(initial.hudVisibility?.visibility, "visible", "HUD should be visible");
@@ -84,6 +84,51 @@ try {
   assert.equal(initial.debug.vectors, true, "vector helper should start enabled");
 
   await page.screenshot({ path: "hud-probe-initial.png" });
+
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(80);
+  const afterDodge = await readUiState();
+  assert.equal(afterDodge.hudText.stamina, "67%", "dodge should drain one third of the stamina bar");
+  assert.ok(
+    afterDodge.hud.staminaPercent <= 67.05 && afterDodge.hud.staminaPercent >= 66.6,
+    "dodge stamina drain should land near two thirds remaining",
+  );
+
+  await page.screenshot({ path: "hud-probe-dodge.png" });
+
+  await page.waitForTimeout(2400);
+  const afterRefill = await readUiState();
+  assert.equal(afterRefill.hudText.stamina, "100%", "stamina should refill back to full");
+  assert.ok(
+    afterRefill.hud.staminaPercent >= 99.9,
+    "stamina refill should restore the bar to full over time",
+  );
+
+  await page.keyboard.press("KeyR");
+  await page.waitForTimeout(180);
+  await page.evaluate(() => window.__TEST__.setHudStaminaPercent(20));
+  const beforeBlockedDodge = await readUiState();
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(80);
+  const blockedDodge = await readUiState();
+  assert.ok(
+    beforeBlockedDodge.hud.staminaPercent < 33,
+    "probe should force stamina below dodge cost",
+  );
+  assert.equal(blockedDodge.actionLock, null, "low stamina should block dodge startup");
+  assert.equal(blockedDodge.rollTimeLeft, 0, "blocked dodge should not create roll movement time");
+  assert.notEqual(blockedDodge.currentClip, "Roll", "blocked dodge should not switch to the roll clip");
+  assert.ok(
+    Math.hypot(
+      blockedDodge.heroPosition.x - beforeBlockedDodge.heroPosition.x,
+      blockedDodge.heroPosition.z - beforeBlockedDodge.heroPosition.z,
+    ) < 0.01,
+    "blocked dodge should not move the hero",
+  );
+  assert.ok(
+    blockedDodge.hud.staminaPercent >= beforeBlockedDodge.hud.staminaPercent,
+    "blocked dodge should not spend stamina",
+  );
 
   await page.keyboard.press("F1");
   await page.waitForTimeout(220);
@@ -108,7 +153,10 @@ try {
     "F1 should uncheck every debug checkbox",
   );
   assert.equal(afterF1.hudText.health, "86%", "HUD should stay visible after F1");
-  assert.equal(afterF1.hudText.stamina, "63%", "HUD should stay visible after F1");
+  assert.ok(
+    afterF1.hud.staminaPercent >= blockedDodge.hud.staminaPercent,
+    "F1 should not reduce the visible stamina state",
+  );
   assert.equal(afterF1.hudVisibility?.visibility, "visible", "HUD should remain visible after F1");
 
   await page.screenshot({ path: "hud-probe-hidden.png" });
@@ -148,6 +196,28 @@ try {
           hudText: initial.hudText,
           crosshair: initial.crosshair,
           debug: initial.debug,
+        },
+        afterDodge: {
+          hud: afterDodge.hud,
+          hudText: afterDodge.hudText,
+        },
+        afterRefill: {
+          hud: afterRefill.hud,
+          hudText: afterRefill.hudText,
+        },
+        blockedDodge: {
+          before: {
+            hud: beforeBlockedDodge.hud,
+            hudText: beforeBlockedDodge.hudText,
+            currentClip: beforeBlockedDodge.currentClip,
+          },
+          after: {
+            hud: blockedDodge.hud,
+            hudText: blockedDodge.hudText,
+            currentClip: blockedDodge.currentClip,
+            actionLock: blockedDodge.actionLock,
+            rollTimeLeft: blockedDodge.rollTimeLeft,
+          },
         },
         afterF1: {
           menusHidden: afterF1.menusHidden,

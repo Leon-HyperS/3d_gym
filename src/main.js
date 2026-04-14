@@ -45,6 +45,9 @@ const CONFIG = {
   baseYawOffset: 0,
   aimDirectionDeadZoneDeg: 22.5,
   hudUiPackId: "scifi_hud",
+  hudStaminaMax: 100,
+  dodgeStaminaCost: 100 / 3,
+  staminaRefillPerSecond: 20,
   shortcutCloseGuardMs: 900,
   maxDelta: 0.05,
 };
@@ -341,7 +344,7 @@ const runtime = {
   },
   hud: {
     healthPercent: 86,
-    staminaPercent: 63,
+    staminaPercent: CONFIG.hudStaminaMax,
     slots: cloneHudSlotStates(),
   },
   aimPoint: new THREE.Vector3(0, CONFIG.ringY, 4),
@@ -376,6 +379,7 @@ const tempAttachmentCross = new THREE.Vector3();
 window.__TEST__ = {
   ready: false,
   getState: () => getTestState(),
+  setHudStaminaPercent: (value) => setHudStaminaPercent(value),
 };
 
 init().catch((error) => {
@@ -803,7 +807,34 @@ function hideMenusAndClearDebug() {
 }
 
 function clampHudPercent(value) {
-  return THREE.MathUtils.clamp(Number(value) || 0, 0, 100);
+  return THREE.MathUtils.clamp(Number(value) || 0, 0, CONFIG.hudStaminaMax);
+}
+
+function setHudStaminaPercent(nextValue) {
+  const clampedValue = clampHudPercent(nextValue);
+  if (Math.abs(clampedValue - runtime.hud.staminaPercent) < 0.0001) {
+    return false;
+  }
+
+  runtime.hud.staminaPercent = clampedValue;
+  renderHud();
+  return true;
+}
+
+function spendHudStamina(amount) {
+  return setHudStaminaPercent(runtime.hud.staminaPercent - amount);
+}
+
+function refillHudStamina(dt) {
+  if (runtime.hud.staminaPercent >= CONFIG.hudStaminaMax) {
+    return false;
+  }
+
+  if (runtime.hero?.actionLock) {
+    return false;
+  }
+
+  return setHudStaminaPercent(runtime.hud.staminaPercent + CONFIG.staminaRefillPerSecond * dt);
 }
 
 function setElementAssetVariable(element, name, assetPath) {
@@ -2446,6 +2477,7 @@ function updateFrame() {
   runtime.hero.mixer.update(dt);
   updateAimTarget(dt);
   updateHero(dt);
+  refillHudStamina(dt);
   syncWeaponAim(runtime.hero);
   updateStageTracking();
   updateCamera(dt);
@@ -3048,6 +3080,11 @@ function requestRoll() {
     return;
   }
 
+  if (runtime.hud.staminaPercent + 0.0001 < CONFIG.dodgeStaminaCost) {
+    showToast("Not enough stamina");
+    return;
+  }
+
   const evadeSelection = getEvadeSelection(hero);
   const evadeClipName = evadeSelection.clipName;
   hero.actionLock = evadeSelection.lockName;
@@ -3071,6 +3108,7 @@ function requestRoll() {
     force: true,
     timeScale: CONFIG.rollPlaybackSpeed,
   });
+  spendHudStamina(CONFIG.dodgeStaminaCost);
   showToast(evadeSelection.label);
 }
 

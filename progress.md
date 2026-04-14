@@ -61,4 +61,8 @@ Original prompt: inspect the repo and understands how the assets are being lever
 - Verified the project still builds successfully with `npm.cmd run build` after the HUD and shortcut changes; the pre-existing large bundle-size warning remains but the build passes.
 - Follow-up HUD polish: removed the grey slot-strip background panel from `src/style.css`, leaving only the individual item boxes visible while keeping the existing HUD probe and build passing.
 - Follow-up HUD polish: replaced the old CSS-drawn crosshair with `/assets/UI Pack - Sci-fi/Vector/Blue/crosshair_color_b.svg`, routed through the existing `uiPacks.scifi_hud.hud` catalog and verified in `scripts/hud-probe.mjs`.
+- Follow-up HUD behavior: `Space` dodge/roll now drains `1/3` of the stamina bar via `CONFIG.dodgeStaminaCost`, and stamina refills automatically at `20` points per second when the hero is no longer in an evade action.
+- Updated `scripts/hud-probe.mjs` to verify the full stamina loop (`100% -> 67% -> 100%`) alongside the existing `F1`, digit-toggle, HUD, and sci-fi crosshair assertions.
+- Follow-up HUD behavior fix: `requestRoll()` now blocks evade startup when stamina is below the dodge cost, shows a `Not enough stamina` toast, and exposes `window.__TEST__.setHudStaminaPercent()` so the Playwright probe can verify the blocked low-stamina case directly.
+- Updated `scripts/hud-probe.mjs` to force stamina below the threshold and confirm `Space` leaves `actionLock` null, `rollTimeLeft` at `0`, and the hero position unchanged while stamina continues refilling normally.
 
