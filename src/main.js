@@ -1690,10 +1690,6 @@ function createGymLevel(scene, renderer) {
   startPadTop.position.y = 0.002;
   stage.add(startPadTop);
 
-  const crosshair = createWorldCrosshair();
-  crosshair.position.set(0, CONFIG.ringY + 0.02, 4);
-  scene.add(crosshair);
-
   const helpers = {
     grid: new THREE.GridHelper(120, 48, 0x4ddfff, 0x26384e),
     axes: new THREE.AxesHelper(2.5),
@@ -1705,41 +1701,7 @@ function createGymLevel(scene, renderer) {
   helpers.origin.position.y = 0.03;
   scene.add(helpers.grid, helpers.axes, helpers.origin);
 
-  return { stage, floor, crosshair, helpers };
-}
-
-function createWorldCrosshair() {
-  const group = new THREE.Group();
-
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.18, 0.27, 32),
-    new THREE.MeshBasicMaterial({
-      color: 0x7de9ff,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.92,
-    }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  group.add(ring);
-
-  const hLine = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.52, 0.02),
-    new THREE.MeshBasicMaterial({
-      color: 0xff9866,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.9,
-    }),
-  );
-  hLine.rotation.x = -Math.PI / 2;
-  group.add(hLine);
-
-  const vLine = hLine.clone();
-  vLine.rotation.z = Math.PI / 2;
-  group.add(vLine);
-
-  return group;
+  return { stage, floor, helpers };
 }
 
 function createOriginMarker() {
@@ -2391,7 +2353,6 @@ function updateAimTarget(dt) {
   const aimDistance = THREE.MathUtils.clamp(1.4 + screenDistance * 0.015, 1.4, 8);
   runtime.aimPoint.copy(runtime.hero.root.position).addScaledVector(tempVector, aimDistance);
   runtime.aimPoint.y = CONFIG.ringY + 0.02;
-  runtime.world.crosshair.position.copy(runtime.aimPoint);
 
   let targetYaw = Math.atan2(tempVector.x, tempVector.z);
   const pistolYawTarget = getWeaponDrivenTargetYaw(runtime.hero, runtime.hero.attachments?.pistol, runtime.aimPoint);
@@ -2524,7 +2485,6 @@ function updateDebugHelpers() {
   worldHelpers.grid.visible = runtime.debug.grid;
   worldHelpers.axes.visible = runtime.debug.axes;
   worldHelpers.origin.visible = runtime.debug.origin;
-  runtime.world.crosshair.visible = true;
 
   if (!runtime.hero) {
     return;

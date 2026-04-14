@@ -51,4 +51,5 @@ Original prompt: inspect the repo and understands how the assets are being lever
 - `syncAttachmentAim()` now keeps the pistol `aimPivot` at identity when `horizontalOnly` is active, so the weapon no longer rotates independently inside the hand.
 - Added `getWeaponDrivenTargetYaw()` so pistol stance facing is solved from the socket/weapon forward offset and the crosshair target, giving horizontal crosshair alignment without moving the gun away from the hand.
 - Live verification after the weapon-driven yaw change showed `aimPivotRotationDeg` stayed exactly `{ x: 0, y: 0, z: 0 }`, `aimPivotOffsetFromSocket` stayed `0`, and `aimAlignmentDot` remained effectively `1.0` for both left and right off-center aims.
+- Removed the world-space ground crosshair mesh and its scene update hooks; the internal `aimPoint` logic remains in place for pistol facing/alignment, but there is no longer a visible target marker projected onto the floor.
 
