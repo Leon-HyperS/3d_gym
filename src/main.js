@@ -44,6 +44,7 @@ const CONFIG = {
   turnLerp: 10.5,
   baseYawOffset: 0,
   aimDirectionDeadZoneDeg: 22.5,
+  hudUiPackId: "scifi_hud",
   shortcutCloseGuardMs: 900,
   maxDelta: 0.05,
 };
@@ -164,6 +165,7 @@ const REQUIRED_ACTION_KEYS = [
 ];
 
 const ALWAYS_PREVENT_DEFAULT_CODES = new Set([
+  "F1",
   "Space",
   "ArrowUp",
   "ArrowDown",
@@ -181,6 +183,18 @@ const CTRL_SHORTCUT_BLOCKED_CODES = new Set([
   "KeyR",
   "KeyF",
 ]);
+
+const DEFAULT_HUD_SLOT_STATES = [
+  { indexLabel: "1", active: true },
+  { indexLabel: "2", active: false },
+  { indexLabel: "3", active: false },
+  { indexLabel: "4", active: false },
+  { indexLabel: "5", active: false },
+];
+
+function cloneHudSlotStates(slots = DEFAULT_HUD_SLOT_STATES) {
+  return slots.map((slot) => ({ ...slot }));
+}
 
 const UPPER_BODY_NODES = new Set([
   "spine_01",
@@ -263,10 +277,17 @@ const RIGHT_HAND_SOCKET_BONES = [
 
 const dom = {
   app: document.querySelector("#app"),
+  uiShell: document.querySelector("#ui"),
+  hud: document.querySelector("#hud"),
   clip: document.querySelector("#status-clip"),
   state: document.querySelector("#status-state"),
   position: document.querySelector("#status-position"),
   yaw: document.querySelector("#status-yaw"),
+  hudHealthFill: document.querySelector("#hud-health-fill"),
+  hudHealthValue: document.querySelector("#hud-health-value"),
+  hudStaminaFill: document.querySelector("#hud-stamina-fill"),
+  hudStaminaValue: document.querySelector("#hud-stamina-value"),
+  hudSlots: [...document.querySelectorAll("[data-hud-slot]")],
   crosshair: document.querySelector("#mouse-crosshair"),
   flash: document.querySelector("#flash-overlay"),
   toastContainer: document.querySelector("#toast-container"),
@@ -282,6 +303,8 @@ const runtime = {
   controls: null,
   world: null,
   asset: null,
+  uiPacks: [],
+  hudPack: null,
   hero: null,
   clock: new THREE.Clock(),
   modelYawOffset: CONFIG.baseYawOffset,
@@ -312,6 +335,14 @@ const runtime = {
     clientY: window.innerHeight * 0.5,
     ndc: new THREE.Vector2(0, 0),
     overUi: false,
+  },
+  ui: {
+    menusHidden: false,
+  },
+  hud: {
+    healthPercent: 86,
+    staminaPercent: 63,
+    slots: cloneHudSlotStates(),
   },
   aimPoint: new THREE.Vector3(0, CONFIG.ringY, 4),
   lastStatusUpdate: 0,
@@ -369,7 +400,11 @@ async function init() {
   window.addEventListener("resize", handleResize);
   handleResize();
 
-  runtime.asset = await loadAssetContract();
+  const assetCatalog = await loadAssetContract();
+  runtime.asset = assetCatalog.asset;
+  runtime.uiPacks = assetCatalog.uiPacks;
+  applyHudAssetPack(getDefaultHudPack(runtime.uiPacks));
+  renderHud();
   runtime.hero = await loadHero(runtime.scene, runtime.asset);
   applyDebugVisibility();
   syncGroundedAnimation(runtime.hero, true);
@@ -578,6 +613,9 @@ function bindKeyboard() {
       case "KeyF":
         runtime.input.parryModifier = true;
         break;
+      case "F1":
+        hideMenusAndClearDebug();
+        break;
       case "Digit1":
         toggleDebugFlag("grid");
         break;
@@ -735,6 +773,97 @@ function handleResize() {
     THREE.MathUtils.clamp(runtime.mouse.clientX, 0, window.innerWidth),
     THREE.MathUtils.clamp(runtime.mouse.clientY, 0, window.innerHeight),
   );
+}
+
+function setMenuOverlayHidden(hidden) {
+  runtime.ui.menusHidden = hidden;
+  dom.uiShell?.classList.toggle("ui-shell--hidden", hidden);
+  runtime.mouse.overUi = false;
+  updatePointerFromClient(
+    THREE.MathUtils.clamp(runtime.mouse.clientX, 0, window.innerWidth),
+    THREE.MathUtils.clamp(runtime.mouse.clientY, 0, window.innerHeight),
+  );
+}
+
+function clearAllDebugFlags() {
+  for (const key of Object.keys(runtime.debug)) {
+    runtime.debug[key] = false;
+  }
+
+  for (const input of dom.debugInputs) {
+    input.checked = false;
+  }
+
+  applyDebugVisibility();
+}
+
+function hideMenusAndClearDebug() {
+  setMenuOverlayHidden(true);
+  clearAllDebugFlags();
+}
+
+function clampHudPercent(value) {
+  return THREE.MathUtils.clamp(Number(value) || 0, 0, 100);
+}
+
+function setElementAssetVariable(element, name, assetPath) {
+  if (!element || !assetPath) {
+    return;
+  }
+  element.style.setProperty(name, `url("${assetPath}")`);
+}
+
+function setHudAssetVariable(name, assetPath) {
+  setElementAssetVariable(dom.hud, name, assetPath);
+}
+
+function applyHudAssetPack(pack) {
+  runtime.hudPack = pack ?? null;
+  if (!dom.hud || !runtime.hudPack?.hud) {
+    return;
+  }
+
+  setHudAssetVariable("--hud-health-frame", runtime.hudPack.hud.healthFrame);
+  setHudAssetVariable("--hud-health-fill", runtime.hudPack.hud.healthFill);
+  setHudAssetVariable("--hud-stamina-frame", runtime.hudPack.hud.staminaFrame);
+  setHudAssetVariable("--hud-stamina-fill", runtime.hudPack.hud.staminaFill);
+  setElementAssetVariable(dom.crosshair, "--crosshair-asset", runtime.hudPack.hud.crosshair);
+  setHudAssetVariable("--hud-slot-base", runtime.hudPack.hud.slotBase);
+  setHudAssetVariable("--hud-slot-active", runtime.hudPack.hud.slotActive);
+  setHudAssetVariable("--hud-slot-strip", runtime.hudPack.hud.slotStrip);
+  dom.hud.dataset.hudPack = runtime.hudPack.id;
+}
+
+function renderHud() {
+  if (!dom.hud) {
+    return;
+  }
+
+  const healthPercent = clampHudPercent(runtime.hud.healthPercent);
+  const staminaPercent = clampHudPercent(runtime.hud.staminaPercent);
+
+  if (dom.hudHealthFill) {
+    dom.hudHealthFill.style.width = `${healthPercent}%`;
+  }
+  if (dom.hudHealthValue) {
+    dom.hudHealthValue.textContent = `${Math.round(healthPercent)}%`;
+  }
+
+  if (dom.hudStaminaFill) {
+    dom.hudStaminaFill.style.width = `${staminaPercent}%`;
+  }
+  if (dom.hudStaminaValue) {
+    dom.hudStaminaValue.textContent = `${Math.round(staminaPercent)}%`;
+  }
+
+  dom.hudSlots.forEach((slotElement, index) => {
+    const slotState = runtime.hud.slots[index];
+    slotElement.classList.toggle("is-active", slotState?.active === true);
+    const label = slotElement.querySelector(".hud-slot__index");
+    if (label) {
+      label.textContent = slotState?.indexLabel ?? String(index + 1);
+    }
+  });
 }
 
 function getAnimationPacks(asset) {
@@ -954,6 +1083,59 @@ function normalizeAssetContract(asset) {
   };
 }
 
+function normalizeUiAssetPath(path, label) {
+  if (typeof path !== "string" || path.trim() === "") {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+  return path;
+}
+
+function normalizeHudUiDefinition(hud, label) {
+  if (hud == null || typeof hud !== "object" || Array.isArray(hud)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  return {
+    healthFrame: normalizeUiAssetPath(hud.healthFrame, `${label}.healthFrame`),
+    healthFill: normalizeUiAssetPath(hud.healthFill, `${label}.healthFill`),
+    staminaFrame: normalizeUiAssetPath(hud.staminaFrame, `${label}.staminaFrame`),
+    staminaFill: normalizeUiAssetPath(hud.staminaFill, `${label}.staminaFill`),
+    crosshair: normalizeUiAssetPath(hud.crosshair, `${label}.crosshair`),
+    slotBase: normalizeUiAssetPath(hud.slotBase, `${label}.slotBase`),
+    slotActive: normalizeUiAssetPath(hud.slotActive, `${label}.slotActive`),
+    slotStrip: normalizeUiAssetPath(hud.slotStrip, `${label}.slotStrip`),
+  };
+}
+
+function normalizeUiPacks(uiPacks) {
+  if (uiPacks == null) {
+    return [];
+  }
+
+  if (!Array.isArray(uiPacks)) {
+    throw new Error("UI pack definitions must be an array");
+  }
+
+  return uiPacks.map((pack, index) => {
+    if (!pack?.id) {
+      throw new Error(`UI pack entry at index ${index} is missing an id`);
+    }
+
+    return {
+      ...pack,
+      hud: normalizeHudUiDefinition(pack.hud, `UI pack '${pack.id}' hud`),
+    };
+  });
+}
+
+function getDefaultHudPack(uiPacks) {
+  if (!Array.isArray(uiPacks) || uiPacks.length === 0) {
+    return null;
+  }
+
+  return uiPacks.find((pack) => pack.id === CONFIG.hudUiPackId) ?? uiPacks[0];
+}
+
 function collectNamedSceneNodes(root) {
   const names = new Set();
   root.traverse((child) => {
@@ -1046,7 +1228,10 @@ async function loadAssetContract() {
     throw new Error("Asset contract does not contain 'universal'");
   }
 
-  return normalizeAssetContract(asset);
+  return {
+    asset: normalizeAssetContract(asset),
+    uiPacks: normalizeUiPacks(data.uiPacks),
+  };
 }
 
 async function loadHero(scene, asset) {
@@ -3094,6 +3279,16 @@ function getTestState() {
 
   return {
     ready: true,
+    menusHidden: runtime.ui.menusHidden,
+    debug: {
+      ...runtime.debug,
+    },
+    hud: {
+      packId: runtime.hudPack?.id ?? null,
+      healthPercent: runtime.hud.healthPercent,
+      staminaPercent: runtime.hud.staminaPercent,
+      activeSlots: runtime.hud.slots.map((slot) => slot.active),
+    },
     heroPosition: {
       x: runtime.hero.root.position.x,
       y: runtime.hero.root.position.y,

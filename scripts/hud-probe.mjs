@@ -1,0 +1,167 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+
+const url = process.argv[2] ?? "http://127.0.0.1:4180/";
+
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({
+  viewport: { width: 1440, height: 1100 },
+});
+
+try {
+  await page.goto(url, { waitUntil: "networkidle" });
+  await page.waitForFunction(() => window.__TEST__?.ready === true);
+  await page.mouse.move(1180, 440);
+  await page.mouse.click(1180, 860);
+  await page.waitForTimeout(220);
+
+  async function readUiState() {
+    return page.evaluate(() => {
+      const testState = window.__TEST__.getState();
+      const uiShell = document.querySelector("#ui");
+      const hud = document.querySelector("#hud");
+      const crosshair = document.querySelector("#mouse-crosshair");
+      const uiStyle = uiShell ? getComputedStyle(uiShell) : null;
+      const hudStyle = hud ? getComputedStyle(hud) : null;
+      const crosshairStyle = crosshair ? getComputedStyle(crosshair) : null;
+
+      return {
+        ...testState,
+        hudText: {
+          health: document.querySelector("#hud-health-value")?.textContent?.trim() ?? null,
+          stamina: document.querySelector("#hud-stamina-value")?.textContent?.trim() ?? null,
+          slotCount: document.querySelectorAll("[data-hud-slot]").length,
+        },
+        uiShell: uiShell
+          ? {
+              hiddenClass: uiShell.classList.contains("ui-shell--hidden"),
+              opacity: uiStyle.opacity,
+              visibility: uiStyle.visibility,
+            }
+          : null,
+        hudVisibility: hud
+          ? {
+              display: hudStyle.display,
+              visibility: hudStyle.visibility,
+              width: hud.getBoundingClientRect().width,
+              height: hud.getBoundingClientRect().height,
+              packId: hud.dataset.hudPack ?? null,
+            }
+          : null,
+        crosshair: crosshair
+          ? {
+              backgroundImage: crosshairStyle.backgroundImage,
+              width: crosshair.getBoundingClientRect().width,
+              height: crosshair.getBoundingClientRect().height,
+              opacity: crosshairStyle.opacity,
+            }
+          : null,
+        checkboxes: [...document.querySelectorAll("[data-debug-toggle]")].map((input) => ({
+          key: input.dataset.debugToggle,
+          checked: input.checked,
+        })),
+      };
+    });
+  }
+
+  const initial = await readUiState();
+  assert.equal(initial.menusHidden, false, "menus should start visible");
+  assert.equal(initial.hud.packId, "scifi_hud", "hud should use the sci-fi ui pack");
+  assert.equal(initial.hudText.health, "86%", "health HUD should render the demo value");
+  assert.equal(initial.hudText.stamina, "63%", "stamina HUD should render the demo value");
+  assert.equal(initial.hudText.slotCount, 5, "HUD should render five slots");
+  assert.equal(initial.uiShell?.hiddenClass, false, "menu shell should start visible");
+  assert.equal(initial.hudVisibility?.visibility, "visible", "HUD should be visible");
+  assert.ok(initial.hudVisibility?.width > 0, "HUD should occupy layout space");
+  assert.ok(
+    initial.crosshair?.backgroundImage.includes("crosshair_color_b.svg"),
+    "crosshair should use the sci-fi SVG asset",
+  );
+  assert.equal(initial.crosshair?.width, 28, "crosshair width should stay calibrated");
+  assert.equal(initial.crosshair?.height, 28, "crosshair height should stay calibrated");
+  assert.equal(initial.debug.grid, true, "grid should start enabled");
+  assert.equal(initial.debug.origin, true, "origin marker should start enabled");
+  assert.equal(initial.debug.vectors, true, "vector helper should start enabled");
+
+  await page.screenshot({ path: "hud-probe-initial.png" });
+
+  await page.keyboard.press("F1");
+  await page.waitForTimeout(220);
+  const afterF1 = await readUiState();
+  if (afterF1.uiShell?.visibility !== "hidden") {
+    console.error("afterF1 state:", JSON.stringify(afterF1, null, 2));
+  }
+  assert.equal(afterF1.menusHidden, true, "F1 should hide the menu shell");
+  assert.equal(afterF1.uiShell?.hiddenClass, true, "menu shell should carry the hidden class");
+  assert.equal(afterF1.uiShell?.visibility, "hidden", "menu shell should be visually hidden");
+  assert.ok(
+    afterF1.crosshair?.backgroundImage.includes("crosshair_color_b.svg"),
+    "crosshair should keep using the sci-fi SVG after F1",
+  );
+  assert.notEqual(afterF1.crosshair?.opacity, "0", "crosshair should remain visible in gameplay view");
+  assert.ok(
+    Object.values(afterF1.debug).every((value) => value === false),
+    "F1 should clear all debug flags",
+  );
+  assert.ok(
+    afterF1.checkboxes.every((checkbox) => checkbox.checked === false),
+    "F1 should uncheck every debug checkbox",
+  );
+  assert.equal(afterF1.hudText.health, "86%", "HUD should stay visible after F1");
+  assert.equal(afterF1.hudText.stamina, "63%", "HUD should stay visible after F1");
+  assert.equal(afterF1.hudVisibility?.visibility, "visible", "HUD should remain visible after F1");
+
+  await page.screenshot({ path: "hud-probe-hidden.png" });
+
+  const debugKeysByShortcut = [
+    ["Digit1", "grid"],
+    ["Digit2", "axes"],
+    ["Digit3", "origin"],
+    ["Digit4", "bounds"],
+    ["Digit5", "skeleton"],
+    ["Digit6", "vectors"],
+    ["Digit7", "hitboxes"],
+    ["Digit8", "orbit"],
+  ];
+
+  const digitChecks = [];
+  for (const [key, debugKey] of debugKeysByShortcut) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(80);
+    const state = await readUiState();
+    const matchingCheckbox = state.checkboxes.find((checkbox) => checkbox.key === debugKey);
+    assert.equal(state.debug[debugKey], true, `${key} should still toggle ${debugKey}`);
+    assert.equal(matchingCheckbox?.checked, true, `${key} should still sync the ${debugKey} checkbox`);
+    digitChecks.push({
+      key,
+      debugKey,
+      enabled: state.debug[debugKey],
+    });
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        initial: {
+          menusHidden: initial.menusHidden,
+          hud: initial.hud,
+          hudText: initial.hudText,
+          crosshair: initial.crosshair,
+          debug: initial.debug,
+        },
+        afterF1: {
+          menusHidden: afterF1.menusHidden,
+          hudText: afterF1.hudText,
+          crosshair: afterF1.crosshair,
+          debug: afterF1.debug,
+          uiShell: afterF1.uiShell,
+        },
+        digitChecks,
+      },
+      null,
+      2,
+    ),
+  );
+} finally {
+  await browser.close();
+}

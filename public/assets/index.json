@@ -931,5 +931,22 @@
         }
       ]
     }
+  ],
+  "uiPacks": [
+    {
+      "id": "scifi_hud",
+      "displayName": "Sci-fi HUD Pack",
+      "pathPrefix": "/assets/UI Pack - Sci-fi/Vector",
+      "hud": {
+        "healthFrame": "/assets/UI Pack - Sci-fi/Vector/Extra/bar_shadow_square_outline_large.svg",
+        "healthFill": "/assets/UI Pack - Sci-fi/Vector/Red/bar_square_large.svg",
+        "staminaFrame": "/assets/UI Pack - Sci-fi/Vector/Extra/bar_shadow_square_outline_small.svg",
+        "staminaFill": "/assets/UI Pack - Sci-fi/Vector/Green/bar_square_small.svg",
+        "crosshair": "/assets/UI Pack - Sci-fi/Vector/Blue/crosshair_color_b.svg",
+        "slotBase": "/assets/UI Pack - Sci-fi/Vector/Grey/button_square_header_small_square.svg",
+        "slotActive": "/assets/UI Pack - Sci-fi/Vector/Blue/button_square_header_small_square.svg",
+        "slotStrip": "/assets/UI Pack - Sci-fi/Vector/Extra/panel_rectangle.svg"
+      }
+    }
   ]
 }

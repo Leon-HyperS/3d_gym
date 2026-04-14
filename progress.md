@@ -52,4 +52,13 @@ Original prompt: inspect the repo and understands how the assets are being lever
 - Added `getWeaponDrivenTargetYaw()` so pistol stance facing is solved from the socket/weapon forward offset and the crosshair target, giving horizontal crosshair alignment without moving the gun away from the hand.
 - Live verification after the weapon-driven yaw change showed `aimPivotRotationDeg` stayed exactly `{ x: 0, y: 0, z: 0 }`, `aimPivotOffsetFromSocket` stayed `0`, and `aimAlignmentDot` remained effectively `1.0` for both left and right off-center aims.
 - Removed the world-space ground crosshair mesh and its scene update hooks; the internal `aimPoint` logic remains in place for pistol facing/alignment, but there is no longer a visible target marker projected onto the floor.
+- Added a new top-level `uiPacks` catalog to `public/assets/index.json` for the sci-fi HUD SVGs while leaving the existing `assets[].universal` fighter contract unchanged.
+- Split the UI into a hideable `#ui` menu shell and a persistent `#hud` gameplay layer in `index.html` and `src/style.css`.
+- Added visual-only HUD wiring in `src/main.js` with demo health/stamina values, five HUD slots, semantic sci-fi asset-path loading, and test-state exposure for `menusHidden`, `debug`, and `hud`.
+- Added a new `F1` shortcut that clears all debug flags, unchecks the debug inputs, prevents the browser default help action, and hides the menu shell without affecting the persistent HUD.
+- Added `scripts/hud-probe.mjs` to validate the HUD defaults, `F1` hide/reset behavior, and the unchanged `Digit1-Digit8` debug shortcuts through Playwright.
+- Verified the updated HUD in a live Vite session at `http://localhost:5173/`, including pre-`F1` and post-`F1` screenshots during the probe run.
+- Verified the project still builds successfully with `npm.cmd run build` after the HUD and shortcut changes; the pre-existing large bundle-size warning remains but the build passes.
+- Follow-up HUD polish: removed the grey slot-strip background panel from `src/style.css`, leaving only the individual item boxes visible while keeping the existing HUD probe and build passing.
+- Follow-up HUD polish: replaced the old CSS-drawn crosshair with `/assets/UI Pack - Sci-fi/Vector/Blue/crosshair_color_b.svg`, routed through the existing `uiPacks.scifi_hud.hud` catalog and verified in `scripts/hud-probe.mjs`.
 

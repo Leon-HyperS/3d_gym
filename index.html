@@ -29,6 +29,7 @@
           <span><strong>Space</strong> roll</span>
           <span><strong>Q</strong> left punch</span>
           <span><strong>E</strong> right punch</span>
+          <span><strong>F1</strong> hide menus + clear debug</span>
         </div>
       </section>
 
@@ -87,12 +88,55 @@
       </section>
     </div>
 
-    <div id="mouse-crosshair" aria-hidden="true">
-      <div class="crosshair-ring"></div>
-      <div class="crosshair-line crosshair-line--h"></div>
-      <div class="crosshair-line crosshair-line--v"></div>
-      <div class="crosshair-dot"></div>
+    <div id="hud" class="hud" aria-hidden="true">
+      <section class="hud-cluster hud-cluster--meters">
+        <div class="hud-meter">
+          <div class="hud-meter__head">
+            <span class="hud-meter__label">Health</span>
+            <span id="hud-health-value" class="hud-meter__value">0%</span>
+          </div>
+          <div class="hud-meter__frame hud-meter__frame--health">
+            <div class="hud-meter__track">
+              <div id="hud-health-fill" class="hud-meter__fill hud-meter__fill--health"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-meter hud-meter--small">
+          <div class="hud-meter__head">
+            <span class="hud-meter__label">Stamina</span>
+            <span id="hud-stamina-value" class="hud-meter__value">0%</span>
+          </div>
+          <div class="hud-meter__frame hud-meter__frame--stamina">
+            <div class="hud-meter__track">
+              <div id="hud-stamina-fill" class="hud-meter__fill hud-meter__fill--stamina"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="hud-cluster hud-cluster--slots" aria-label="Item slots">
+        <div class="hud-slot-strip">
+          <div class="hud-slot is-active" data-hud-slot>
+            <span class="hud-slot__index">1</span>
+          </div>
+          <div class="hud-slot" data-hud-slot>
+            <span class="hud-slot__index">2</span>
+          </div>
+          <div class="hud-slot" data-hud-slot>
+            <span class="hud-slot__index">3</span>
+          </div>
+          <div class="hud-slot" data-hud-slot>
+            <span class="hud-slot__index">4</span>
+          </div>
+          <div class="hud-slot" data-hud-slot>
+            <span class="hud-slot__index">5</span>
+          </div>
+        </div>
+      </section>
     </div>
+
+    <div id="mouse-crosshair" aria-hidden="true"></div>
     <div id="flash-overlay"></div>
     <div id="toast-container" aria-live="polite"></div>
 
