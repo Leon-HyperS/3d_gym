@@ -464,6 +464,43 @@
           }
         }
       ],
+      "attachments": {
+        "pistol": {
+          "path": "/assets/blaster-a.glb",
+          "socket": {
+            "parentBoneName": "hand_r",
+            "socketName": "weapon_socket_r",
+            "position": {
+              "x": -0.0118,
+              "y": 0.0722,
+              "z": 0.0141
+            },
+            "rotationDeg": {
+              "x": -100.61,
+              "y": 1.72,
+              "z": 165.29
+            }
+          },
+          "meshOffset": {
+            "position": {
+              "x": 0,
+              "y": 0.035,
+              "z": 0.1
+            },
+            "rotationDeg": {
+              "x": 0,
+              "y": -90,
+              "z": 0
+            },
+            "scale": {
+              "x": 2,
+              "y": 2,
+              "z": 2
+            }
+          },
+          "notes": "Attach through the dedicated right-hand weapon socket. The socket defines the grip orientation in hand space; the mesh offset remains identity except for scale because the pistol GLB already uses a usable local barrel/grip axis layout."
+        }
+      },
       "prototypeUtility": {
         "bestUses": [
           "Main playable fighter in a Tekken-like prototype",

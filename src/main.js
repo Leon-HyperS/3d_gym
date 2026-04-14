@@ -253,6 +253,14 @@ const LOWER_BODY_NODES = new Set([
   "ball_leaf_r",
 ]);
 
+const RIGHT_HAND_SOCKET_BONES = [
+  "thumb_01_r",
+  "index_01_r",
+  "middle_01_r",
+  "ring_01_r",
+  "pinky_01_r",
+];
+
 const dom = {
   app: document.querySelector("#app"),
   clip: document.querySelector("#status-clip"),
@@ -309,6 +317,7 @@ const runtime = {
   lastStatusUpdate: 0,
   closeGuardActive: false,
   closeGuardTimeoutId: 0,
+  closeGuardModifierHeld: false,
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -476,20 +485,41 @@ function clearCloseGuard() {
   }
 }
 
-function armCloseGuard() {
+function armCloseGuard({ persistent = false } = {}) {
   clearCloseGuard();
   runtime.closeGuardActive = true;
+  if (persistent) {
+    return;
+  }
   runtime.closeGuardTimeoutId = window.setTimeout(() => {
     runtime.closeGuardActive = false;
     runtime.closeGuardTimeoutId = 0;
   }, CONFIG.shortcutCloseGuardMs);
 }
 
+function setCloseGuardModifierHeld(held) {
+  runtime.closeGuardModifierHeld = held;
+  if (held) {
+    armCloseGuard({ persistent: true });
+    return;
+  }
+  clearCloseGuard();
+}
+
 function bindKeyboard() {
   window.addEventListener("keydown", (event) => {
+    if (
+      event.code === "ControlLeft" ||
+      event.code === "ControlRight" ||
+      event.code === "MetaLeft" ||
+      event.code === "MetaRight"
+    ) {
+      setCloseGuardModifierHeld(true);
+    }
+
     if (shouldPreventBrowserShortcut(event)) {
       if ((event.ctrlKey || event.metaKey) && event.code === "KeyW") {
-        armCloseGuard();
+        armCloseGuard({ persistent: runtime.closeGuardModifierHeld });
       }
       event.preventDefault();
       event.stopPropagation();
@@ -523,7 +553,7 @@ function bindKeyboard() {
         break;
       case "ControlLeft":
       case "ControlRight":
-        runtime.input.crouchModifier = true;
+        runtime.input.crouchModifier = !runtime.input.crouchModifier;
         break;
       case "Space":
         event.preventDefault();
@@ -575,7 +605,9 @@ function bindKeyboard() {
       return;
     }
 
-    clearCloseGuard();
+    if (!runtime.closeGuardModifierHeld) {
+      clearCloseGuard();
+    }
     event.preventDefault();
     event.returnValue = "";
   });
@@ -604,7 +636,11 @@ function bindKeyboard() {
         break;
       case "ControlLeft":
       case "ControlRight":
-        runtime.input.crouchModifier = false;
+        setCloseGuardModifierHeld(false);
+        break;
+      case "MetaLeft":
+      case "MetaRight":
+        setCloseGuardModifierHeld(false);
         break;
       case "KeyF":
         runtime.input.parryModifier = false;
@@ -669,6 +705,7 @@ function bindPointer() {
   window.addEventListener("blur", () => {
     runtime.input.pistolStance = false;
     runtime.input.parryModifier = false;
+    setCloseGuardModifierHeld(false);
   });
 
   updatePointerFromClient(runtime.mouse.clientX, runtime.mouse.clientY);
@@ -697,12 +734,157 @@ function getAnimationPacks(asset) {
   return Array.isArray(asset?.animationPacks) ? asset.animationPacks : [];
 }
 
+function normalizeFiniteNumber(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(`${label} must be a finite number`);
+  }
+  return number;
+}
+
+function cloneVectorConfig(vector) {
+  return {
+    x: vector.x,
+    y: vector.y,
+    z: vector.z,
+  };
+}
+
+function normalizeVectorConfig(value, label, fallback) {
+  if (value == null) {
+    return cloneVectorConfig(fallback);
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length !== 3) {
+      throw new Error(`${label} must contain exactly three values`);
+    }
+    return {
+      x: normalizeFiniteNumber(value[0], `${label}.x`),
+      y: normalizeFiniteNumber(value[1], `${label}.y`),
+      z: normalizeFiniteNumber(value[2], `${label}.z`),
+    };
+  }
+
+  if (typeof value === "object") {
+    return {
+      x: normalizeFiniteNumber(value.x, `${label}.x`),
+      y: normalizeFiniteNumber(value.y, `${label}.y`),
+      z: normalizeFiniteNumber(value.z, `${label}.z`),
+    };
+  }
+
+  throw new Error(`${label} must be an object or array`);
+}
+
+function normalizeScaleConfig(value, label) {
+  const normalized = normalizeVectorConfig(value, label, { x: 1, y: 1, z: 1 });
+  for (const [axis, component] of Object.entries(normalized)) {
+    if (component <= 0) {
+      throw new Error(`${label}.${axis} must be greater than 0`);
+    }
+  }
+  return normalized;
+}
+
+function normalizeSocketDefinition(key, socket) {
+  if (!socket?.parentBoneName) {
+    throw new Error(`Attachment '${key}' socket is missing a parentBoneName`);
+  }
+
+  if (!socket.socketName) {
+    throw new Error(`Attachment '${key}' socket is missing a socketName`);
+  }
+
+  const rotationDeg = normalizeVectorConfig(
+    socket.rotationDeg,
+    `Attachment '${key}' socket rotationDeg`,
+    { x: 0, y: 0, z: 0 },
+  );
+
+  return {
+    ...socket,
+    parentBoneName: socket.parentBoneName,
+    socketName: socket.socketName,
+    position: normalizeVectorConfig(
+      socket.position,
+      `Attachment '${key}' socket position`,
+      { x: 0, y: 0, z: 0 },
+    ),
+    rotation: {
+      x: THREE.MathUtils.degToRad(rotationDeg.x),
+      y: THREE.MathUtils.degToRad(rotationDeg.y),
+      z: THREE.MathUtils.degToRad(rotationDeg.z),
+    },
+  };
+}
+
+function normalizeAttachmentMeshOffset(key, meshOffset) {
+  const rotationDeg = normalizeVectorConfig(
+    meshOffset?.rotationDeg,
+    `Attachment '${key}' meshOffset rotationDeg`,
+    { x: 0, y: 0, z: 0 },
+  );
+
+  return {
+    position: normalizeVectorConfig(
+      meshOffset?.position,
+      `Attachment '${key}' meshOffset position`,
+      { x: 0, y: 0, z: 0 },
+    ),
+    rotation: {
+      x: THREE.MathUtils.degToRad(rotationDeg.x),
+      y: THREE.MathUtils.degToRad(rotationDeg.y),
+      z: THREE.MathUtils.degToRad(rotationDeg.z),
+    },
+    scale: normalizeScaleConfig(
+      meshOffset?.scale,
+      `Attachment '${key}' meshOffset scale`,
+    ),
+  };
+}
+
+function normalizeSocketAttachmentDefinition(key, attachment) {
+  if (!attachment?.path) {
+    throw new Error(`Attachment '${key}' is missing a path`);
+  }
+
+  if (!attachment.socket) {
+    throw new Error(`Attachment '${key}' is missing a socket definition`);
+  }
+
+  return {
+    ...attachment,
+    path: attachment.path,
+    socket: normalizeSocketDefinition(key, attachment.socket),
+    meshOffset: normalizeAttachmentMeshOffset(key, attachment.meshOffset),
+  };
+}
+
+function normalizeAssetAttachments(attachments) {
+  if (attachments == null) {
+    return {};
+  }
+
+  if (typeof attachments !== "object" || Array.isArray(attachments)) {
+    throw new Error("Asset contract attachments must be an object");
+  }
+
+  const normalized = { ...attachments };
+  if (attachments.pistol) {
+    normalized.pistol = normalizeSocketAttachmentDefinition("pistol", attachments.pistol);
+  }
+
+  return normalized;
+}
+
 function normalizeAssetContract(asset) {
   if (!asset?.path) {
     throw new Error("Asset contract is missing a base model path for 'universal'");
   }
 
   const animationPacks = getAnimationPacks(asset);
+  const attachments = normalizeAssetAttachments(asset.attachments);
   for (const pack of animationPacks) {
     if (!pack?.id) {
       throw new Error("Animation pack entry is missing an id");
@@ -715,6 +897,7 @@ function normalizeAssetContract(asset) {
   return {
     ...asset,
     animationPacks,
+    attachments,
   };
 }
 
@@ -815,14 +998,19 @@ async function loadAssetContract() {
 
 async function loadHero(scene, asset) {
   const loader = new GLTFLoader();
+  const pistolAttachment = asset.attachments?.pistol ?? null;
+  const pistolLoadPromise = pistolAttachment ? loader.loadAsync(pistolAttachment.path) : Promise.resolve(null);
   const baseGltf = await loader.loadAsync(asset.path);
   const animationPacks = getAnimationPacks(asset);
-  const packLoads = await Promise.all(
-    animationPacks.map(async (pack) => ({
-      pack,
-      gltf: await loader.loadAsync(pack.path),
-    })),
-  );
+  const [packLoads, pistolGltf] = await Promise.all([
+    Promise.all(
+      animationPacks.map(async (pack) => ({
+        pack,
+        gltf: await loader.loadAsync(pack.path),
+      })),
+    ),
+    pistolLoadPromise,
+  ]);
 
   for (const { pack, gltf } of packLoads) {
     validateAnimationPackCompatibility(baseGltf.scene, gltf.scene, pack);
@@ -976,7 +1164,17 @@ async function loadHero(scene, asset) {
     rollTimeLeft: 0,
     evadeRecoveryTimeLeft: 0,
     rollDirection: new THREE.Vector3(0, 0, 1),
+    attachments: {},
   };
+
+  if (pistolAttachment && pistolGltf?.scene) {
+    hero.attachments.pistol = createPropAttachment(
+      model,
+      "pistol",
+      pistolAttachment,
+      pistolGltf.scene,
+    );
+  }
 
   mixer.addEventListener("finished", (event) => {
     const finishedClip = event.action?.getClip()?.name;
@@ -1007,6 +1205,7 @@ async function loadHero(scene, asset) {
     }
   });
 
+  syncPistolVisibility(hero);
   return hero;
 }
 
@@ -1153,6 +1352,105 @@ function computeVisibleMeshBounds(root) {
   }
 
   return box;
+}
+
+function applyTransformToObject3D(target, transform) {
+  target.position.set(transform.position.x, transform.position.y, transform.position.z);
+  target.rotation.set(transform.rotation.x, transform.rotation.y, transform.rotation.z);
+  target.scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
+}
+
+function prepareAttachmentModel(root) {
+  root.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material && "side" in material) {
+          material.side = THREE.DoubleSide;
+        }
+      }
+    }
+  });
+}
+
+function getNamedChild(parent, name) {
+  return parent.children.find((child) => child.name === name) ?? null;
+}
+
+function validateSocketParentBone(model, socketConfig) {
+  const parentBone = model.getObjectByName(socketConfig.parentBoneName);
+  if (!parentBone) {
+    throw new Error(`Attachment socket parent '${socketConfig.parentBoneName}' was not found on the hero model`);
+  }
+
+  if (
+    socketConfig.parentBoneName === "hand_r" ||
+    socketConfig.socketName === "weapon_socket_r"
+  ) {
+    const missingBones = RIGHT_HAND_SOCKET_BONES.filter((name) => !parentBone.getObjectByName(name));
+    if (missingBones.length > 0) {
+      throw new Error(
+        `Right-hand weapon socket validation failed. Missing right-hand bones: ${missingBones.join(", ")}`,
+      );
+    }
+  }
+
+  return parentBone;
+}
+
+function ensureAttachmentSocket(model, socketConfig) {
+  const parentBone = validateSocketParentBone(model, socketConfig);
+  let socket = getNamedChild(parentBone, socketConfig.socketName);
+  if (!socket) {
+    socket = new THREE.Group();
+    socket.name = socketConfig.socketName;
+    parentBone.add(socket);
+  }
+
+  socket.position.set(
+    socketConfig.position.x,
+    socketConfig.position.y,
+    socketConfig.position.z,
+  );
+  socket.rotation.set(
+    socketConfig.rotation.x,
+    socketConfig.rotation.y,
+    socketConfig.rotation.z,
+  );
+  socket.scale.set(1, 1, 1);
+  socket.updateMatrixWorld(true);
+
+  return {
+    parentBone,
+    socket,
+  };
+}
+
+function createPropAttachment(model, key, attachment, sourceScene) {
+  const { parentBone, socket } = ensureAttachmentSocket(model, attachment.socket);
+
+  const meshRoot = new THREE.Group();
+  meshRoot.name = `${key.charAt(0).toUpperCase()}${key.slice(1)}MeshRoot`;
+  applyTransformToObject3D(meshRoot, attachment.meshOffset);
+  const root = sourceScene.clone(true);
+  root.name = `${socket.name}Model`;
+  prepareAttachmentModel(root);
+  root.visible = false;
+
+  socket.add(meshRoot);
+  meshRoot.add(root);
+  socket.updateMatrixWorld(true);
+
+  return {
+    key,
+    config: attachment,
+    parentBone,
+    socket,
+    meshRoot,
+    root,
+  };
 }
 
 function createGymLevel(scene, renderer) {
@@ -2205,6 +2503,31 @@ function getLowerBodyLayer(hero, actionKey = resolveLocomotionActionKey(hero)) {
   };
 }
 
+function isPistolPresentationActive(hero) {
+  return (
+    hero.upperBodyActionLock === ACTIONS.pistolShoot ||
+    hero.upperClip === ACTIONS.pistolStance ||
+    hero.upperClip === ACTIONS.pistolShoot
+  );
+}
+
+function syncPistolVisibility(hero) {
+  const pistolAttachment = hero?.attachments?.pistol;
+  if (!pistolAttachment) {
+    return;
+  }
+
+  pistolAttachment.root.visible = isPistolPresentationActive(hero);
+}
+
+function rotationToDegrees(rotation) {
+  return {
+    x: THREE.MathUtils.radToDeg(rotation.x),
+    y: THREE.MathUtils.radToDeg(rotation.y),
+    z: THREE.MathUtils.radToDeg(rotation.z),
+  };
+}
+
 function playLayeredState(
   hero,
   { upperAction, upperClip, upperLoop = true, lowerAction, lowerClip, force = false, fade = 0.08 },
@@ -2225,6 +2548,7 @@ function playLayeredState(
     hero.currentClip = `${upperClip} + ${lowerClip}`;
     hero.upperClip = upperClip;
     hero.lowerClip = lowerClip;
+    syncPistolVisibility(hero);
     return;
   }
 
@@ -2255,6 +2579,7 @@ function playLayeredState(
   hero.currentClip = `${upperClip} + ${lowerClip}`;
   hero.upperClip = upperClip;
   hero.lowerClip = lowerClip;
+  syncPistolVisibility(hero);
 }
 
 function configureLayerAction(action, { loop, fade }) {
@@ -2400,6 +2725,7 @@ function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, tim
     hero.upperClip = null;
     hero.lowerClip = null;
     hero.animationMode = "full";
+    syncPistolVisibility(hero);
     return nextAction;
   }
 
@@ -2420,6 +2746,7 @@ function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, tim
   hero.upperClip = null;
   hero.lowerClip = null;
   hero.animationMode = "full";
+  syncPistolVisibility(hero);
   return nextAction;
 }
 
@@ -2541,6 +2868,30 @@ function getTestState() {
     sprintModifier: runtime.input.sprintModifier,
     crouchModifier: runtime.input.crouchModifier,
     pistolStance: runtime.input.pistolStance,
+    pistolPresented: isPistolPresentationActive(runtime.hero),
+    pistolAttachment: runtime.hero.attachments?.pistol
+      ? {
+          parentBoneName: runtime.hero.attachments.pistol.parentBone.name,
+          socketName: runtime.hero.attachments.pistol.socket.name,
+          visible: runtime.hero.attachments.pistol.root.visible,
+          socketLocalPosition: {
+            x: runtime.hero.attachments.pistol.socket.position.x,
+            y: runtime.hero.attachments.pistol.socket.position.y,
+            z: runtime.hero.attachments.pistol.socket.position.z,
+          },
+          socketLocalRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.socket.rotation),
+          meshOffsetPosition: {
+            x: runtime.hero.attachments.pistol.meshRoot.position.x,
+            y: runtime.hero.attachments.pistol.meshRoot.position.y,
+            z: runtime.hero.attachments.pistol.meshRoot.position.z,
+          },
+          meshOffsetRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.meshRoot.rotation),
+          meshAxisCorrectionApplied:
+            Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.x) > 0.0001 ||
+            Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.y) > 0.0001 ||
+            Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.z) > 0.0001,
+        }
+      : null,
     parryModifier: runtime.input.parryModifier,
     mouse: {
       x: runtime.mouse.clientX,
