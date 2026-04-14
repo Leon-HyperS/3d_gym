@@ -22,7 +22,7 @@ const CONFIG = {
   crouchSpeed: 1.35,
   pistolMoveSpeed: 2.05,
   pistolShootRecoverySeconds: 0.1,
-  punchRecoverySeconds: 0.18,
+  punchRecoverySeconds: 0.28,
   runSpeed: 4.15,
   sprintSpeed: 5.65,
   rollSpeed: 6.5,
