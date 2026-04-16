@@ -4,14 +4,14 @@
   "assets": [
     {
       "id": "universal",
-      "displayName": "Universal Mannequin",
-      "path": "/assets/universal.glb",
+      "displayName": "Robo V4",
+      "path": "/assets/robo_v4.glb",
       "role": "primary_fighter_prototype",
       "format": "glb",
-      "summary": "Base mannequin GLB plus compatible UAL expansion packs that keep one stable character mesh while loading a much larger merged animation library at runtime.",
+      "summary": "Robot base GLB that swaps the gym fighter's mannequin look while preserving the shared 67-node Armature rig contract used by the existing UAL animation packs at runtime.",
       "sourceFile": {
-        "sha256": "D867292451E432B735E2A910C2DB6640FBEA97B205D85A2E8FFED26DA87972CF",
-        "fileSizeBytes": 8114364,
+        "sha256": "20646AFD5D6C0091539FAEAD1600EBCE2DD6291068957247C73556455A6F55AA",
+        "fileSizeBytes": 45793392,
         "glbVersion": 2
       },
       "structure": {
@@ -19,19 +19,18 @@
         "nodes": 67,
         "meshes": 1,
         "meshNames": [
-          "Mannequin"
+          "input.003"
         ],
-        "materials": 2,
+        "materials": 1,
         "materialNames": [
-          "M_Main",
-          "M_Joints"
+          "material_0.003"
         ],
         "skins": 1,
         "skinNames": [
           "Armature"
         ],
-        "textures": 1,
-        "images": 1,
+        "textures": 2,
+        "images": 2,
         "samplers": 1
       },
       "animationPacks": [
@@ -70,7 +69,7 @@
             "baseAssetId": "universal",
             "expectedSharedSkin": "Armature",
             "matchingNamedNodeSet": true,
-            "integrationNote": "This pack reuses the same mannequin mesh, material names, and 67-node rig as universal.glb, so its clips can bind directly to the base fighter."
+            "integrationNote": "This pack stays on the same named Armature and bone-node contract expected by the robo base, so its clips can still bind directly when the runtime rig validation passes."
           },
           "mergePolicy": {
             "duplicateClipBehavior": "keep_existing",
@@ -161,7 +160,7 @@
               {
                 "id": "ual1_locomotion_turns_and_dodges",
                 "displayName": "UAL1 Locomotion / Turns / Dodges",
-                "notes": "Extra crouch, jog, sprint-transition, turn, and dodge variants that stay on the same base mannequin rig.",
+                "notes": "Extra crouch, jog, sprint-transition, turn, and dodge variants that stay on the same shared Armature rig contract.",
                 "clipNames": [
                   "Crouch_Bwd_L_Loop",
                   "Crouch_Bwd_Loop",
@@ -280,7 +279,7 @@
             "baseAssetId": "universal",
             "expectedSharedSkin": "Armature",
             "matchingNamedNodeSet": true,
-            "integrationNote": "This pack also matches the universal mannequin node names exactly, so its tracks can be merged onto the existing character without retargeting."
+            "integrationNote": "This pack also stays on the same named Armature and bone-node contract as the robo base, so its tracks can be merged onto the existing character without retargeting when rig validation passes."
           },
           "mergePolicy": {
             "duplicateClipBehavior": "keep_existing",
@@ -334,7 +333,7 @@
               {
                 "id": "ual2_idle_walk_and_shield_variants",
                 "displayName": "UAL2 Idle / Walk / Shield Variants",
-                "notes": "Expanded neutral poses, shield stances, transitions, and directional walk variants that stay compatible with the same base mannequin.",
+                "notes": "Expanded neutral poses, shield stances, transitions, and directional walk variants that stay compatible with the same shared Armature rig contract.",
                 "clipNames": [
                   "Bandage_Loop",
                   "Chest_Open",
@@ -517,9 +516,9 @@
         "strengths": [
           "Covers baseline locomotion, crouch, jump, hit reactions, death, and light melee punches",
           "Includes root-motion variants for roll and sword attack, which are useful for advancing actions",
-          "Ships as a single GLB with one embedded texture, so browser loading is simple",
+          "Ships as a single GLB with embedded textures, so browser loading stays simple",
           "Single skinned mesh keeps animation indexing and mixer setup straightforward",
-          "UAL1.glb and UAL2.glb share the same mannequin mesh, material names, and Armature rig, so their clips can be merged onto the base fighter without retargeting"
+          "UAL1.glb and UAL2.glb stay on the same named Armature and bone-node contract, so their clips can be merged onto the base fighter without retargeting when rig validation passes"
         ],
         "limitations": [
           "No explicit guard, sidestep, backdash, kick chain, throw, launcher, wake-up, or knockdown recovery clips",
@@ -553,7 +552,7 @@
           "Treat Roll_RM and Sword_Attack_RM as opt-in root-motion clips and validate ring movement before binding them to combat.",
           "Use SkeletonUtils.clone() for a second fighter or training dummy because the asset is skinned and animated.",
           "Normalize the model from visible mesh bounds, not Box3.setFromObject(), to avoid floating caused by skeleton bones.",
-          "Load UAL1.glb and UAL2.glb after universal.glb and keep the base clip when a duplicate name appears in an expansion pack.",
+          "Load UAL1.glb and UAL2.glb after robo_v4.glb and keep the base clip when a duplicate name appears in an expansion pack.",
           "Validate that expansion packs keep the same named-node set before merging clips, because upper/lower-body masking depends on exact node names."
         ]
       },

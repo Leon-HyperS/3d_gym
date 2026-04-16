@@ -42,7 +42,7 @@ const CONFIG = {
   cameraLerp: 7.5,
   cameraTargetHeight: 1.35,
   turnLerp: 10.5,
-  baseYawOffset: 0,
+  baseYawOffset: Math.PI,
   aimDirectionDeadZoneDeg: 22.5,
   hudUiPackId: "scifi_hud",
   hudStaminaMax: 100,
@@ -1167,13 +1167,27 @@ function getDefaultHudPack(uiPacks) {
   return uiPacks.find((pack) => pack.id === CONFIG.hudUiPackId) ?? uiPacks[0];
 }
 
-function collectNamedSceneNodes(root) {
+function collectNamedRigNodes(root) {
   const names = new Set();
   root.traverse((child) => {
-    if (child.name) {
+    // Ignore mesh-wrapper names here. Shared animation binding and masking depend on the armature/bone contract.
+    if (child.name && (child.isBone || child.name === "Armature")) {
       names.add(child.name);
     }
   });
+  return names;
+}
+
+function collectAnimatedTrackNodeNames(animations = []) {
+  const names = new Set();
+  for (const clip of animations) {
+    for (const track of clip.tracks) {
+      const nodeName = getTrackNodeName(track.name);
+      if (nodeName) {
+        names.add(nodeName);
+      }
+    }
+  }
   return names;
 }
 
@@ -1192,26 +1206,36 @@ function getAssetSourceLabel(source) {
   return source?.displayName ?? source?.id ?? source?.path ?? "unknown source";
 }
 
-function validateAnimationPackCompatibility(baseScene, packScene, pack) {
-  const baseNodeNames = collectNamedSceneNodes(baseScene);
-  const packNodeNames = collectNamedSceneNodes(packScene);
+function validateAnimationPackCompatibility(baseScene, packScene, pack, packAnimations = []) {
+  const baseNodeNames = collectNamedRigNodes(baseScene);
+  const packNodeNames = collectNamedRigNodes(packScene);
   const missingNodeNames = [...baseNodeNames].filter((name) => !packNodeNames.has(name)).sort();
   const extraNodeNames = [...packNodeNames].filter((name) => !baseNodeNames.has(name)).sort();
+  const missingAnimatedNodeNames = [...collectAnimatedTrackNodeNames(packAnimations)]
+    .filter((name) => !baseNodeNames.has(name))
+    .sort();
 
-  if (missingNodeNames.length === 0 && extraNodeNames.length === 0) {
+  if (
+    missingNodeNames.length === 0 &&
+    extraNodeNames.length === 0 &&
+    missingAnimatedNodeNames.length === 0
+  ) {
     return;
   }
 
   const issues = [];
   if (missingNodeNames.length > 0) {
-    issues.push(`missing nodes: ${previewNameList(missingNodeNames)}`);
+    issues.push(`missing rig nodes: ${previewNameList(missingNodeNames)}`);
   }
   if (extraNodeNames.length > 0) {
-    issues.push(`extra nodes: ${previewNameList(extraNodeNames)}`);
+    issues.push(`extra rig nodes: ${previewNameList(extraNodeNames)}`);
+  }
+  if (missingAnimatedNodeNames.length > 0) {
+    issues.push(`missing animated targets: ${previewNameList(missingAnimatedNodeNames)}`);
   }
 
   throw new Error(
-    `Animation pack '${pack.id}' is not rig-compatible with the universal base model (${issues.join("; ")})`,
+    `Animation pack '${pack.id}' is not rig-compatible with the current base model (${issues.join("; ")})`,
   );
 }
 
@@ -1282,7 +1306,7 @@ async function loadHero(scene, asset) {
   ]);
 
   for (const { pack, gltf } of packLoads) {
-    validateAnimationPackCompatibility(baseGltf.scene, gltf.scene, pack);
+    validateAnimationPackCompatibility(baseGltf.scene, gltf.scene, pack, gltf.animations);
   }
 
   const mergedClipRegistry = new Map();
