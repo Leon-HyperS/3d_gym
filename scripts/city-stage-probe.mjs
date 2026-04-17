@@ -303,6 +303,26 @@ try {
     angleDifferenceDeg(beforePistolPan.camera.yawDeg, normalizeYawDeg((beforePistolPan.rootYaw * 180) / Math.PI + 180)) > 20,
     "pistol stance pan setup should start with the camera offset from the recentered behind-the-hero angle",
   );
+  assert.ok(
+    beforePistolPan.pistolMuzzleFlash,
+    "startup should expose the pistol muzzle flash test seam",
+  );
+
+  const preStanceMuzzleTriggerCount = beforePistolPan.pistolMuzzleFlash.triggerCount;
+  await mouseDown(0, 1, 1090, 260);
+  await page.waitForTimeout(80);
+  await mouseUp(0, 0, 1090, 260);
+  const afterInvalidPistolClick = await readState();
+  assert.equal(
+    afterInvalidPistolClick.pistolMuzzleFlash.triggerCount,
+    preStanceMuzzleTriggerCount,
+    "LMB outside pistol stance should not trigger the muzzle flash",
+  );
+  assert.notEqual(
+    afterInvalidPistolClick.upperClip,
+    "Pistol_Shoot",
+    "LMB outside pistol stance should not enter the pistol shot clip",
+  );
 
   await mouseDown(2, 2, 1090, 260);
   await page.waitForTimeout(80);
@@ -326,6 +346,10 @@ try {
     Math.abs(pistolStance.mouse.x - 720) < 1 &&
     Math.abs(pistolStance.mouse.y - 450) < 1,
     "entering pistol stance should recenter the crosshair",
+  );
+  assert.ok(
+    pistolStance.pistolAttachment?.muzzleAnchorLocalPosition?.x > 0.1,
+    "pistol stance should expose a forward muzzle anchor offset for the flash attachment",
   );
   assert.equal(
     pistolStance.aimYawSuppressed,
@@ -358,17 +382,34 @@ try {
   );
   await page.screenshot({ path: "artifacts/city-stage-pistol-pan.png" });
 
+  const triggerCountBeforeShot = afterPistolPan.pistolMuzzleFlash.triggerCount;
   await mouseDown(0, 3, 720, 450);
   await page.waitForTimeout(100);
   const pistolShoot = await readState();
   assert.equal(pistolShoot.upperClip, "Pistol_Shoot", "LMB in pistol stance should still fire");
   assert.equal(pistolShoot.pistolAttachment?.visible, true, "pistol should remain visible while shooting");
+  assert.equal(
+    pistolShoot.pistolMuzzleFlash.triggerCount,
+    triggerCountBeforeShot + 1,
+    "accepted pistol shots should increment the muzzle flash trigger count",
+  );
+  assert.equal(
+    pistolShoot.pistolMuzzleFlash.active,
+    true,
+    "accepted pistol shots should activate the muzzle flash",
+  );
+  await mouseUp(0, 2, 720, 450);
 
   await mouseUp(2, 0, 720, 450);
-  await page.waitForTimeout(220);
+  await page.waitForTimeout(260);
   const afterRelease = await readState();
   assert.equal(afterRelease.pistolPresented, false, "releasing RMB should clear pistol stance");
   assert.equal(afterRelease.currentGround?.objectName != null, true, "combat should not break stage grounding");
+  assert.equal(
+    afterRelease.pistolMuzzleFlash.active,
+    false,
+    "the muzzle flash should settle back to inactive shortly after the shot",
+  );
 
   const alignSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
   assert.equal(alignSetup, true, "snap-camera alignment setup should land back on a legal road");

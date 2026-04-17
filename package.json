@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "three": "^0.183.2"
+    "three": "^0.183.2",
+    "three.quarks": "^0.17.0"
   },
   "devDependencies": {
     "playwright": "^1.59.1",

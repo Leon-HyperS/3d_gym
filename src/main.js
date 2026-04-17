@@ -3,6 +3,11 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+import {
+  createPistolMuzzleFlash,
+  createQuarksBatchRenderer,
+  loadPistolMuzzleFlashTexture,
+} from "./vfx/pistolMuzzleFlash.js";
 
 function makeCameraOffset(yawDeg, pitchDeg, distance) {
   const yaw = THREE.MathUtils.degToRad(yawDeg);
@@ -358,6 +363,10 @@ const runtime = {
   closeGuardActive: false,
   closeGuardTimeoutId: 0,
   closeGuardModifierHeld: false,
+  vfx: {
+    batchRenderer: null,
+    pistolMuzzleFlashTexture: null,
+  },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -413,6 +422,8 @@ init().catch((error) => {
 async function init() {
   runtime.renderer = createRenderer();
   runtime.scene = createScene();
+  runtime.vfx.batchRenderer = createQuarksBatchRenderer();
+  runtime.scene.add(runtime.vfx.batchRenderer);
   runtime.camera = createCamera();
   runtime.controls = createControls(runtime.camera, runtime.renderer.domElement);
 
@@ -424,17 +435,20 @@ async function init() {
   window.addEventListener("resize", handleResize);
   handleResize();
 
-  const [assetCatalog, stageCatalog] = await Promise.all([
+  const [assetCatalog, stageCatalog, pistolMuzzleFlashTexture] = await Promise.all([
     loadAssetContract(),
     loadStageCatalog(),
+    loadPistolMuzzleFlashTexture(),
   ]);
   runtime.asset = assetCatalog.asset;
   runtime.uiPacks = assetCatalog.uiPacks;
+  runtime.vfx.pistolMuzzleFlashTexture = pistolMuzzleFlashTexture;
   runtime.world = await createGymLevel(runtime.scene, runtime.renderer, stageCatalog?.defaultStage ?? null);
   applyActiveCameraControls();
   applyHudAssetPack(getDefaultHudPack(runtime.uiPacks));
   renderHud();
   runtime.hero = await loadHero(runtime.scene, runtime.asset);
+  attachHeroWeaponVfx(runtime.hero);
   placeHeroAtStageSpawn(runtime.hero);
   snapCameraToHero(runtime.hero);
   applyDebugVisibility();
@@ -1847,6 +1861,10 @@ function normalizeSocketAttachmentDefinition(key, attachment) {
     path: attachment.path,
     socket: normalizeSocketDefinition(key, attachment.socket),
     meshOffset: normalizeAttachmentMeshOffset(key, attachment.meshOffset),
+    muzzleOffset: normalizeTransformConfig(
+      attachment.muzzleOffset,
+      `Attachment '${key}' muzzleOffset`,
+    ),
     aiming: normalizeAttachmentAiming(key, attachment.aiming),
   };
 }
@@ -2624,6 +2642,10 @@ function createPropAttachment(model, key, attachment, sourceScene) {
   // Keep the weapon fit transform under the aim pivot so the grip stays anchored in the hand.
   applyTransformToObject3D(meshRoot, attachment.meshOffset);
 
+  const muzzleAnchor = new THREE.Group();
+  muzzleAnchor.name = `${key.charAt(0).toUpperCase()}${key.slice(1)}MuzzleAnchor`;
+  applyTransformToObject3D(muzzleAnchor, attachment.muzzleOffset);
+
   const root = sourceScene.clone(true);
   root.name = `${socket.name}Model`;
   prepareAttachmentModel(root);
@@ -2640,6 +2662,7 @@ function createPropAttachment(model, key, attachment, sourceScene) {
 
   socket.add(aimPivot);
   aimPivot.add(meshRoot);
+  meshRoot.add(muzzleAnchor);
   meshRoot.add(root);
   socket.updateMatrixWorld(true);
 
@@ -2650,10 +2673,34 @@ function createPropAttachment(model, key, attachment, sourceScene) {
     socket,
     aimPivot,
     meshRoot,
+    muzzleAnchor,
     aimLocalForward,
     aimLocalUp,
     root,
+    muzzleFlash: null,
   };
+}
+
+function attachHeroWeaponVfx(hero) {
+  const pistolAttachment = hero?.attachments?.pistol;
+  if (!pistolAttachment || !runtime.vfx.batchRenderer || !runtime.vfx.pistolMuzzleFlashTexture) {
+    return;
+  }
+
+  if (pistolAttachment.muzzleFlash?.root?.parent) {
+    pistolAttachment.muzzleFlash.root.parent.remove(pistolAttachment.muzzleFlash.root);
+  }
+
+  pistolAttachment.muzzleFlash = createPistolMuzzleFlash({
+    batchRenderer: runtime.vfx.batchRenderer,
+    texture: runtime.vfx.pistolMuzzleFlashTexture,
+  });
+  pistolAttachment.muzzleAnchor.add(pistolAttachment.muzzleFlash.root);
+  pistolAttachment.muzzleAnchor.updateMatrixWorld(true);
+}
+
+function playPistolMuzzleFlash(now = performance.now() / 1000) {
+  runtime.hero?.attachments?.pistol?.muzzleFlash?.play(now);
 }
 
 function createWorldLighting(scene, lighting) {
@@ -3692,6 +3739,7 @@ function placeHeroAtStageSpawn(hero) {
 function updateFrame() {
   const dt = Math.min(runtime.clock.getDelta(), CONFIG.maxDelta);
   if (!runtime.hero) {
+    runtime.vfx.batchRenderer?.update(dt);
     runtime.renderer.render(runtime.scene, runtime.camera);
     return;
   }
@@ -3701,6 +3749,7 @@ function updateFrame() {
   updateHero(dt);
   refillHudStamina(dt);
   syncWeaponAim(runtime.hero);
+  runtime.vfx.batchRenderer?.update(dt);
   updateStageTracking();
   updateCamera(dt);
   updateDebugHelpers();
@@ -4408,13 +4457,14 @@ function requestUpperBodyAction(clipName, label, { requiresPistolStance = false 
     hero.upperBodyActionLock ||
     (requiresPistolStance && !runtime.input.pistolStance)
   ) {
-    return;
+    return false;
   }
 
   hero.upperBodyActionLock = clipName;
   hero.upperBodyRecoveryTimeLeft = hero.upperBodyRecoveryDurations[clipName] ?? 0;
   syncGroundedAnimation(hero, true);
   showToast(label);
+  return true;
 }
 
 function requestPunch(clipName, label) {
@@ -4422,9 +4472,13 @@ function requestPunch(clipName, label) {
 }
 
 function requestPistolShoot() {
-  requestUpperBodyAction(ACTIONS.pistolShoot, "Pistol shot", {
+  if (!requestUpperBodyAction(ACTIONS.pistolShoot, "Pistol shot", {
     requiresPistolStance: true,
-  });
+  })) {
+    return;
+  }
+
+  playPistolMuzzleFlash();
 }
 
 function finishRoll(hero) {
@@ -4773,6 +4827,11 @@ function getTestState() {
             z: runtime.hero.attachments.pistol.meshRoot.position.z,
           },
           meshOffsetRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.meshRoot.rotation),
+          muzzleAnchorLocalPosition: {
+            x: runtime.hero.attachments.pistol.muzzleAnchor.position.x,
+            y: runtime.hero.attachments.pistol.muzzleAnchor.position.y,
+            z: runtime.hero.attachments.pistol.muzzleAnchor.position.z,
+          },
           aimForwardAxis: runtime.hero.attachments.pistol.config.aiming.forwardAxis,
           aimUpAxis: runtime.hero.attachments.pistol.config.aiming.upAxis,
           horizontalOnlyAim: runtime.hero.attachments.pistol.config.aiming.horizontalOnly,
@@ -4781,6 +4840,15 @@ function getTestState() {
             Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.x) > 0.0001 ||
             Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.y) > 0.0001 ||
             Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.z) > 0.0001,
+        }
+      : null,
+    pistolMuzzleFlash: runtime.hero.attachments?.pistol?.muzzleFlash
+      ? {
+          active: runtime.hero.attachments.pistol.muzzleFlash.isActive(),
+          triggerCount: runtime.hero.attachments.pistol.muzzleFlash.triggerCount,
+          lastTriggerTime: runtime.hero.attachments.pistol.muzzleFlash.lastTriggerTime,
+          activeUntilTime: runtime.hero.attachments.pistol.muzzleFlash.activeUntilTime,
+          durationSeconds: runtime.hero.attachments.pistol.muzzleFlash.durationSeconds,
         }
       : null,
     parryModifier: runtime.input.parryModifier,
