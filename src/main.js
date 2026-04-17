@@ -40,6 +40,7 @@ const CONFIG = {
   cameraWheelFovStep: 2,
   cameraOffset: makeCameraOffset(45, 40, 12.4),
   cameraLerp: 7.5,
+  cameraYawPanLerp: 8.5,
   cameraTargetHeight: 1.35,
   turnLerp: 10.5,
   baseYawOffset: Math.PI,
@@ -349,6 +350,7 @@ const runtime = {
     slots: cloneHudSlotStates(),
   },
   cameraYawDeg: null,
+  cameraYawTargetDeg: null,
   aimPoint: new THREE.Vector3(0, CONFIG.ringY, 4),
   lastStatusUpdate: 0,
   closeGuardActive: false,
@@ -465,6 +467,37 @@ function normalizeYawDegrees(value) {
   return THREE.MathUtils.euclideanModulo(value, 360);
 }
 
+function getBaseCameraYawDeg() {
+  return runtime.world?.stageData?.camera?.yawDeg ?? CONFIG.cameraYawDeg;
+}
+
+function syncCameraYawState(dt = 0) {
+  if (runtime.cameraYawDeg == null) {
+    runtime.cameraYawDeg = getBaseCameraYawDeg();
+  }
+  if (runtime.cameraYawTargetDeg == null) {
+    runtime.cameraYawTargetDeg = runtime.cameraYawDeg;
+  }
+  if (dt <= 0) {
+    return;
+  }
+
+  runtime.cameraYawDeg = normalizeYawDegrees(
+    THREE.MathUtils.radToDeg(
+      dampAngle(
+        THREE.MathUtils.degToRad(runtime.cameraYawDeg),
+        THREE.MathUtils.degToRad(runtime.cameraYawTargetDeg),
+        CONFIG.cameraYawPanLerp,
+        dt,
+      ),
+    ),
+  );
+
+  if (Math.abs((((runtime.cameraYawDeg - runtime.cameraYawTargetDeg) % 360) + 540) % 360 - 180) < 0.15) {
+    runtime.cameraYawDeg = runtime.cameraYawTargetDeg;
+  }
+}
+
 function getActiveCameraSettings() {
   const stageCamera = runtime.world?.stageData?.camera;
   return {
@@ -496,6 +529,7 @@ function snapCameraToHero(hero) {
     return;
   }
 
+  syncCameraYawState(0);
   const camera = getActiveCameraSettings();
   runtime.cameraTarget.copy(hero.root.position);
   runtime.cameraTarget.y += camera.targetHeight;
@@ -523,17 +557,17 @@ function snapCameraAndFacePlayerFront() {
     return;
   }
 
+  syncCameraYawState(0);
   const heroFacingYawDeg = normalizeYawDegrees(THREE.MathUtils.radToDeg(hero.root.rotation.y));
-  runtime.cameraYawDeg = normalizeYawDegrees(heroFacingYawDeg + 180);
+  runtime.cameraYawTargetDeg = normalizeYawDegrees(heroFacingYawDeg + 180);
 
-  const targetYaw = getPlayerFrontYawForCameraYaw(runtime.cameraYawDeg);
+  const targetYaw = getPlayerFrontYawForCameraYaw(runtime.cameraYawTargetDeg);
   hero.root.rotation.y = targetYaw;
   hero.lastMoveDirection.set(Math.sin(targetYaw), 0, Math.cos(targetYaw));
   hero.rollDirection.copy(hero.lastMoveDirection);
   resetAimPointFromHero(hero);
   runtime.mouse.overUi = false;
   updatePointerFromClient(window.innerWidth * 0.5, window.innerHeight * 0.5);
-  snapCameraToHero(hero);
 }
 
 function getTopDownOcclusionCameraSettings(baseCamera, world = runtime.world) {
@@ -3841,6 +3875,7 @@ function updateStageTracking() {
 
 function updateCamera(dt) {
   const hero = runtime.hero;
+  syncCameraYawState(dt);
   const camera = getActiveCameraSettings();
   runtime.cameraTarget.copy(hero.root.position);
   runtime.cameraTarget.y += camera.targetHeight;
@@ -4612,6 +4647,7 @@ function getTestState() {
       desiredDistance: runtime.world.cameraTelemetry?.desiredDistance ?? desiredCameraDistance,
       clampedDistance: runtime.world.cameraTelemetry?.clampedDistance ?? desiredCameraDistance,
       yawDeg: currentCameraYawDeg,
+      targetYawDeg: runtime.cameraYawTargetDeg ?? normalizeYawDegrees(getActiveCameraSettings().yawDeg),
       desiredYawDeg: runtime.world.cameraTelemetry?.desiredYawDeg ?? normalizeYawDegrees(getActiveCameraSettings().yawDeg),
       pitchDeg: currentCameraPitchDeg,
       desiredPitchDeg: runtime.world.cameraTelemetry?.desiredPitchDeg ?? getActiveCameraSettings().pitchDeg,

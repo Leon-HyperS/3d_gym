@@ -234,16 +234,31 @@ try {
     "snap-camera setup should start with the camera offset from the recentered behind-the-hero angle",
   );
   await page.keyboard.press("KeyV");
-  await page.waitForTimeout(120);
-  const afterCameraAlign = await readState();
-  const expectedPlayerFrontYawDeg = normalizeYawDeg(afterCameraAlign.camera.yawDeg + 180);
+  await page.waitForTimeout(80);
+  const duringCameraAlign = await readState();
+  const expectedPlayerFrontYawDeg = normalizeYawDeg(duringCameraAlign.camera.targetYawDeg + 180);
   assert.ok(
-    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,
-    "V should visibly snap the camera to a new alignment angle",
+    angleDifferenceDeg(duringCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 2,
+    "V should start moving the camera toward the new angle quickly",
   );
   assert.ok(
-    angleDifferenceDeg((afterCameraAlign.rootYaw * 180) / Math.PI, expectedPlayerFrontYawDeg) < 2,
-    "V should rotate the hero to face player-front relative to the snapped camera angle",
+    angleDifferenceDeg(duringCameraAlign.camera.yawDeg, duringCameraAlign.camera.targetYawDeg) > 4,
+    "V camera motion should pan instead of finishing in a single frame",
+  );
+  assert.ok(
+    angleDifferenceDeg((duringCameraAlign.rootYaw * 180) / Math.PI, expectedPlayerFrontYawDeg) < 2,
+    "V should rotate the hero to face player-front for the target camera angle immediately",
+  );
+  await page.waitForTimeout(520);
+  const afterCameraAlign = await readState();
+  assert.ok(
+    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, afterCameraAlign.camera.targetYawDeg)
+      < angleDifferenceDeg(duringCameraAlign.camera.yawDeg, duringCameraAlign.camera.targetYawDeg),
+    "V should keep panning the camera closer to the target angle over time",
+  );
+  assert.ok(
+    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,
+    "V should visibly pan the camera to a new alignment angle",
   );
   assert.ok(
     Math.abs(afterCameraAlign.mouse.x - 720) < 1 &&
@@ -308,6 +323,7 @@ try {
         },
         cameraAlign: {
           before: beforeCameraAlign.camera,
+          during: duringCameraAlign.camera,
           after: afterCameraAlign.camera,
           beforeRootYaw: beforeCameraAlign.rootYaw,
           afterRootYaw: afterCameraAlign.rootYaw,

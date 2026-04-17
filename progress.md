@@ -163,3 +163,17 @@ Original prompt: inspect the repo and understands how the assets are being lever
     - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
     - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
   - Retried the shared skill client at `~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`; it still fails here for the same reason as before (`ERR_MODULE_NOT_FOUND` for `playwright`), so the repo-local Playwright probes remain the reliable verification path in this environment.
+- `V` camera easing polish:
+  - Reworked the `V` recenter in `src/main.js` from an instant yaw snap to a short eased pan by splitting the camera heading into current-yaw and target-yaw state and damping the current yaw toward the target over time.
+  - Kept the existing `V` intent intact: the hero still rotates immediately to player-front for the target camera angle, the aim point resets from that aligned facing, and the crosshair recenters to the viewport midpoint.
+  - Extended `window.__TEST__.getState()` camera payload with `targetYawDeg` so tests can distinguish the intended recenter heading from the in-flight smoothed camera position.
+  - Updated `scripts/city-stage-probe.mjs` so the `V` regression now verifies:
+    - the camera begins panning toward the recenter angle immediately after pressing `V`
+    - the motion remains visibly in-between on the first sample instead of snapping in one frame
+    - the hero is already facing player-front for the target camera angle while the camera finishes the pan
+    - the camera keeps progressing toward the target angle and the crosshair stays centered
+  - Updated the control legend in `index.html` from `V snap camera + face front` to `V pan camera + face front`.
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
