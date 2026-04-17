@@ -34,6 +34,20 @@ function normalizeYawDeg(value) {
   return ((value % 360) + 360) % 360;
 }
 
+async function movePointer(clientX, clientY) {
+  await page.evaluate(
+    ([nextX, nextY]) => {
+      const target = document.body;
+      target.dispatchEvent(new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: nextX,
+        clientY: nextY,
+      }));
+    },
+    [clientX, clientY],
+  );
+}
+
 try {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(() => window.__TEST__?.ready === true);
@@ -50,6 +64,52 @@ try {
     initial.route?.walkableMeshPrefixes.includes(initial.currentGround.baseName),
     "spawn should land on the legal road mesh set",
   );
+
+  async function runFacingRelativeEvadeCase({
+    key,
+    expectedActionLock,
+    expectedClip,
+    expectedAxis,
+    expectedSign,
+    description,
+    screenshotPath = null,
+  }) {
+    const setup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 270);
+    assert.equal(setup, true, `${description} setup should land on a legal road`);
+    await page.evaluate(() => window.__TEST__.setHudStaminaPercent(100));
+    await movePointer(720, 450);
+    await page.waitForTimeout(120);
+    const before = await readState();
+    assert.ok(
+      angleDifferenceDeg(normalizeYawDeg((before.rootYaw * 180) / Math.PI), 270) < 3,
+      `${description} setup should keep the hero facing left`,
+    );
+
+    await page.keyboard.down(key);
+    await page.waitForTimeout(40);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(120);
+    const active = await readState();
+    if (screenshotPath) {
+      await page.screenshot({ path: screenshotPath });
+    }
+    await page.keyboard.up(key);
+
+    assert.equal(active.actionLock, expectedActionLock, `${description} should pick the expected evade lock`);
+    assert.equal(active.currentClip, expectedClip, `${description} should pick the expected evade clip`);
+
+    await page.waitForTimeout(1500);
+    const after = await readState();
+    assert.equal(after.actionLock, null, `${description} should recover back to normal control`);
+
+    const delta = after.heroPosition[expectedAxis] - before.heroPosition[expectedAxis];
+    assert.ok(
+      expectedSign > 0 ? delta > 0.45 : delta < -0.45,
+      `${description} should move in the expected screen direction`,
+    );
+
+    return { before, active, after };
+  }
 
   await page.screenshot({ path: "artifacts/city-stage-road-readability.png" });
 
@@ -109,6 +169,40 @@ try {
     Math.abs(afterReset.heroPosition.y - initial.heroPosition.y) < 0.001,
     "reset should restore the spawn ground height",
   );
+
+  const dodgeDownLeft = await runFacingRelativeEvadeCase({
+    key: "ArrowDown",
+    expectedActionLock: "dodgeLeft",
+    expectedClip: "Dodge_Left",
+    expectedAxis: "z",
+    expectedSign: 1,
+    description: "down + space while facing left",
+    screenshotPath: "artifacts/city-stage-facing-left-dodge-left.png",
+  });
+  const dodgeUpRight = await runFacingRelativeEvadeCase({
+    key: "ArrowUp",
+    expectedActionLock: "dodgeRight",
+    expectedClip: "Dodge_Right",
+    expectedAxis: "z",
+    expectedSign: -1,
+    description: "up + space while facing left",
+  });
+  const dodgeRightBack = await runFacingRelativeEvadeCase({
+    key: "ArrowRight",
+    expectedActionLock: "backFlip",
+    expectedClip: "BackFlip",
+    expectedAxis: "x",
+    expectedSign: 1,
+    description: "right + space while facing left",
+  });
+  const restoreAfterDirectionalDodges = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 45);
+  assert.equal(
+    restoreAfterDirectionalDodges,
+    true,
+    "directional dodge verification should be able to restore the spawn road position",
+  );
+  await movePointer(720, 450);
+  await page.waitForTimeout(180);
 
   const illegalRoadAttempt = await teleportHero(20, -6, 0);
   assert.equal(illegalRoadAttempt, false, "off-road teleport should be rejected by the legal-road contract");
@@ -298,6 +392,26 @@ try {
         afterReset: {
           heroPosition: afterReset.heroPosition,
           currentGround: afterReset.currentGround,
+        },
+        directionalDodges: {
+          downLeft: {
+            clip: dodgeDownLeft.active.currentClip,
+            actionLock: dodgeDownLeft.active.actionLock,
+            before: dodgeDownLeft.before.heroPosition,
+            after: dodgeDownLeft.after.heroPosition,
+          },
+          upRight: {
+            clip: dodgeUpRight.active.currentClip,
+            actionLock: dodgeUpRight.active.actionLock,
+            before: dodgeUpRight.before.heroPosition,
+            after: dodgeUpRight.after.heroPosition,
+          },
+          rightBack: {
+            clip: dodgeRightBack.active.currentClip,
+            actionLock: dodgeRightBack.active.actionLock,
+            before: dodgeRightBack.before.heroPosition,
+            after: dodgeRightBack.after.heroPosition,
+          },
         },
         afterIllegalRoadAttempt: {
           heroPosition: afterIllegalRoadAttempt.heroPosition,

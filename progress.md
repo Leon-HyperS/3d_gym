@@ -177,3 +177,21 @@ Original prompt: inspect the repo and understands how the assets are being lever
     - `npm.cmd run build`
     - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
     - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+- Facing-relative dodge remap:
+  - Reworked evade selection in `src/main.js` so `Space` now reads the current camera-relative move vector, reinterprets it in the hero/crosshair-facing frame, and picks the evade clip from that relative intent instead of from raw `left/right/back` key flags.
+  - Kept the actual evade travel aligned with the pressed screen direction, while remapping the clip choice to the hero frame. This makes cases like `face left + down + Space => Dodge_Left`, `face left + up + Space => Dodge_Right`, and `face left + right + Space => BackFlip` resolve the way the controls visually suggest.
+  - Refactored the aim-relative direction math into a reusable helper so normal locomotion still uses the existing 8-way aim-relative mapping, while evades use a 4-way forward/right/back/left interpretation.
+  - Updated `scripts/city-stage-probe.mjs` with deterministic facing-relative dodge coverage by:
+    - topping stamina back up before each mapping case so the probe is not coupled to earlier dodge usage in the same smoke test
+    - teleporting the hero to spawn facing left with the pointer centered
+    - asserting the expected clip/action lock for `ArrowDown`, `ArrowUp`, and `ArrowRight` when each is combined with `Space`
+    - asserting the resulting travel direction on the road matches the pressed screen direction
+  - Visual spot checks:
+    - `artifacts/city-stage-facing-left-dodge-left.png` shows the left-facing down-dodge case reading correctly in-world
+    - `artifacts/city-stage-facing-left-back-dodge.png` shows the left-facing right+space case entering `BackFlip` with the hero moving to screen-right / character-back
+    - the focused local Playwright capture for the back-dodge case reported no console errors
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+  - Retried the shared skill client at `C:\Users\leonl\.codex\skills\develop-web-game\scripts\web_game_playwright_client.js`; it still fails in this environment with `ERR_MODULE_NOT_FOUND` for `playwright`, so the repo-local Playwright probes remain the reliable verification path here.

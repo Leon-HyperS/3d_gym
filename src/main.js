@@ -4020,17 +4020,31 @@ function getAimForwardVector(hero, target = tempAimDirection) {
   return target;
 }
 
-function getAimRelativeMoveDirection(hero) {
-  if (!hero || hero.moveDirection.lengthSq() < 0.0001) {
+function getAimRelativeDirectionFromVector(hero, vector, { fourWay = false } = {}) {
+  if (!hero || vector.lengthSq() < 0.0001) {
     return "forward";
   }
 
   const aimForward = getAimForwardVector(hero);
   tempAimRight.crossVectors(aimForward, UP).normalize();
 
-  const forwardDot = hero.moveDirection.dot(aimForward);
-  const rightDot = hero.moveDirection.dot(tempAimRight);
+  const forwardDot = vector.dot(aimForward);
+  const rightDot = vector.dot(tempAimRight);
   const angleDeg = THREE.MathUtils.radToDeg(Math.atan2(rightDot, forwardDot));
+
+  if (fourWay) {
+    if (angleDeg >= -45 && angleDeg < 45) {
+      return "forward";
+    }
+    if (angleDeg >= 45 && angleDeg < 135) {
+      return "right";
+    }
+    if (angleDeg >= 135 || angleDeg < -135) {
+      return "back";
+    }
+    return "left";
+  }
+
   const deadZone = CONFIG.aimDirectionDeadZoneDeg;
 
   if (angleDeg >= -deadZone && angleDeg < deadZone) {
@@ -4055,6 +4069,14 @@ function getAimRelativeMoveDirection(hero) {
     return "left";
   }
   return "forwardLeft";
+}
+
+function getAimRelativeMoveDirection(hero) {
+  if (!hero) {
+    return "forward";
+  }
+
+  return getAimRelativeDirectionFromVector(hero, hero.moveDirection);
 }
 
 function getDirectionalActionKey(group, direction) {
@@ -4254,33 +4276,34 @@ function configureLayerAction(action, { loop, fade }) {
 }
 
 function getEvadeSelection(hero) {
-  const aimForward = getAimForwardVector(hero);
-  tempAimRight.crossVectors(aimForward, UP).normalize();
+  const desiredMove = getCameraRelativeMove();
+  const evadeDirection = getAimRelativeDirectionFromVector(hero, desiredMove, { fourWay: true });
+  const evadeMove = desiredMove.lengthSq() > 0 ? desiredMove : getAimForwardVector(hero);
 
-  if (runtime.input.left && !runtime.input.right) {
+  if (evadeDirection === "left") {
     return {
       clipName: ACTIONS.dodgeLeft,
       lockName: "dodgeLeft",
       label: "Dodge left",
-      direction: tempEvadeDirection.copy(tempAimRight).multiplyScalar(-1),
+      direction: tempEvadeDirection.copy(evadeMove),
     };
   }
 
-  if (runtime.input.right && !runtime.input.left) {
+  if (evadeDirection === "right") {
     return {
       clipName: ACTIONS.dodgeRight,
       lockName: "dodgeRight",
       label: "Dodge right",
-      direction: tempEvadeDirection.copy(tempAimRight),
+      direction: tempEvadeDirection.copy(evadeMove),
     };
   }
 
-  if (runtime.input.back && !runtime.input.forward) {
+  if (evadeDirection === "back") {
     return {
       clipName: ACTIONS.backFlip,
       lockName: "backFlip",
       label: "Backflip",
-      direction: tempEvadeDirection.copy(aimForward).multiplyScalar(-1),
+      direction: tempEvadeDirection.copy(evadeMove),
     };
   }
 
@@ -4288,7 +4311,7 @@ function getEvadeSelection(hero) {
     clipName: ACTIONS.roll,
     lockName: "roll",
     label: "Roll",
-    direction: tempEvadeDirection.copy(aimForward),
+    direction: tempEvadeDirection.copy(evadeMove),
   };
 }
 
