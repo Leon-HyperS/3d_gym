@@ -149,3 +149,17 @@ Original prompt: inspect the repo and understands how the assets are being lever
     - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
     - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
   - Tried to run the shared skill client at `~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`, but it failed in this environment because that skill-local script could not resolve the `playwright` package (`ERR_MODULE_NOT_FOUND`), so verification relied on the repo-local Playwright probes instead.
+- `V` snap-camera + face-front change:
+  - Replaced the old `V` behavior in `src/main.js` so it now snaps the camera behind the hero's current facing direction, keeps the hero facing player-front relative to that new snapped camera angle, resets the aim point from that aligned facing, and recenters the crosshair to the middle of the screen.
+  - Updated the control legend in `index.html` from `V face player front` to `V snap camera + face front`.
+  - Updated `scripts/city-stage-probe.mjs` so the `V` regression now verifies:
+    - the camera starts offset from the behind-the-hero recenter angle
+    - `V` visibly snaps the camera to the new aligned angle
+    - the hero faces player-front relative to that snapped camera
+    - the crosshair resets to the viewport center
+  - Visual verification via a dedicated screenshot confirmed the camera snaps behind the hero cleanly on the road while the crosshair returns to the center of the screen after pressing `V`.
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+  - Retried the shared skill client at `~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`; it still fails here for the same reason as before (`ERR_MODULE_NOT_FOUND` for `playwright`), so the repo-local Playwright probes remain the reliable verification path in this environment.

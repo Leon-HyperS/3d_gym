@@ -30,6 +30,10 @@ function angleDifferenceDeg(a, b) {
   return Math.abs((((a - b) % 360) + 540) % 360 - 180);
 }
 
+function normalizeYawDeg(value) {
+  return ((value % 360) + 360) % 360;
+}
+
 try {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(() => window.__TEST__?.ready === true);
@@ -214,20 +218,41 @@ try {
   assert.equal(afterRelease.currentGround?.objectName != null, true, "combat should not break stage grounding");
 
   const alignSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
-  assert.equal(alignSetup, true, "camera-align setup should land back on a legal road");
-  await page.waitForTimeout(180);
+  assert.equal(alignSetup, true, "snap-camera alignment setup should land back on a legal road");
+  await page.evaluate(() => {
+    const target = document.body;
+    target.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true,
+      clientX: 1090,
+      clientY: 260,
+    }));
+  });
+  await page.waitForTimeout(220);
   const beforeCameraAlign = await readState();
-  const expectedAlignedYawDeg = (beforeCameraAlign.rootYaw * 180) / Math.PI;
   assert.ok(
-    angleDifferenceDeg(beforeCameraAlign.camera.yawDeg, expectedAlignedYawDeg) > 20,
-    "camera-align setup should start offset from the hero facing direction",
+    angleDifferenceDeg(beforeCameraAlign.camera.yawDeg, normalizeYawDeg((beforeCameraAlign.rootYaw * 180) / Math.PI + 180)) > 20,
+    "snap-camera setup should start with the camera offset from the recentered behind-the-hero angle",
   );
   await page.keyboard.press("KeyV");
   await page.waitForTimeout(120);
   const afterCameraAlign = await readState();
+  const expectedPlayerFrontYawDeg = normalizeYawDeg(afterCameraAlign.camera.yawDeg + 180);
   assert.ok(
-    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, expectedAlignedYawDeg) < 2,
-    "V should align the camera behind the hero facing direction",
+    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,
+    "V should visibly snap the camera to a new alignment angle",
+  );
+  assert.ok(
+    angleDifferenceDeg((afterCameraAlign.rootYaw * 180) / Math.PI, expectedPlayerFrontYawDeg) < 2,
+    "V should rotate the hero to face player-front relative to the snapped camera angle",
+  );
+  assert.ok(
+    Math.abs(afterCameraAlign.mouse.x - 720) < 1 &&
+    Math.abs(afterCameraAlign.mouse.y - 450) < 1,
+    "V should reset the crosshair back to the center of the screen",
+  );
+  assert.ok(
+    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,
+    "V should visibly snap the camera instead of leaving it in the previous angle",
   );
 
   console.log(
@@ -284,7 +309,9 @@ try {
         cameraAlign: {
           before: beforeCameraAlign.camera,
           after: afterCameraAlign.camera,
-          rootYaw: beforeCameraAlign.rootYaw,
+          beforeRootYaw: beforeCameraAlign.rootYaw,
+          afterRootYaw: afterCameraAlign.rootYaw,
+          mouse: afterCameraAlign.mouse,
         },
       },
       null,

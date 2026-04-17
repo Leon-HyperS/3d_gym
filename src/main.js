@@ -513,30 +513,27 @@ function snapCameraToHero(hero) {
   }
 }
 
-function getHeroFacingCameraYawDeg(hero) {
-  if (!hero) {
-    return getActiveCameraSettings().yawDeg;
-  }
-
-  hero.model.getWorldDirection(tempWorldForward);
-  tempWorldForward.y = 0;
-  if (tempWorldForward.lengthSq() < 0.0001) {
-    return normalizeYawDegrees(THREE.MathUtils.radToDeg(hero.root.rotation.y));
-  }
-
-  tempWorldForward.normalize();
-  return normalizeYawDegrees(
-    THREE.MathUtils.radToDeg(Math.atan2(-tempWorldForward.x, -tempWorldForward.z)),
-  );
+function getPlayerFrontYawForCameraYaw(cameraYawDeg) {
+  return THREE.MathUtils.degToRad(normalizeYawDegrees(cameraYawDeg + 180));
 }
 
-function alignCameraToHeroFacing() {
-  if (!runtime.hero) {
+function snapCameraAndFacePlayerFront() {
+  const hero = runtime.hero;
+  if (!hero) {
     return;
   }
 
-  runtime.cameraYawDeg = getHeroFacingCameraYawDeg(runtime.hero);
-  snapCameraToHero(runtime.hero);
+  const heroFacingYawDeg = normalizeYawDegrees(THREE.MathUtils.radToDeg(hero.root.rotation.y));
+  runtime.cameraYawDeg = normalizeYawDegrees(heroFacingYawDeg + 180);
+
+  const targetYaw = getPlayerFrontYawForCameraYaw(runtime.cameraYawDeg);
+  hero.root.rotation.y = targetYaw;
+  hero.lastMoveDirection.set(Math.sin(targetYaw), 0, Math.cos(targetYaw));
+  hero.rollDirection.copy(hero.lastMoveDirection);
+  resetAimPointFromHero(hero);
+  runtime.mouse.overUi = false;
+  updatePointerFromClient(window.innerWidth * 0.5, window.innerHeight * 0.5);
+  snapCameraToHero(hero);
 }
 
 function getTopDownOcclusionCameraSettings(baseCamera, world = runtime.world) {
@@ -963,7 +960,7 @@ function bindKeyboard() {
         runtime.input.parryModifier = true;
         break;
       case "KeyV":
-        alignCameraToHeroFacing();
+        snapCameraAndFacePlayerFront();
         break;
       case "F1":
         hideMenusAndClearDebug();
