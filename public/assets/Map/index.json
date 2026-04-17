@@ -95,7 +95,10 @@
         "minDistance": 6,
         "probeRadius": 0.75,
         "fadeOpacity": 0.14,
-        "fadeLerp": 11
+        "fadeLerp": 11,
+        "topDownPitchDeg": 54,
+        "topDownDistance": 20,
+        "topDownTriggerDistanceRatio": 0.9
       },
       "route": {
         "enabled": true,

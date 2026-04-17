@@ -129,3 +129,23 @@ Original prompt: inspect the repo and understands how the assets are being lever
     - `npm.cmd run build`
     - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
     - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+- Follow-up camera-control quality-of-life pass:
+  - Added a `V` shortcut in `src/main.js` that aligns the gameplay camera behind the character's current visual facing direction by updating the active camera yaw and snapping the follow camera immediately.
+  - Extended `window.__TEST__.getState()` camera payload with `yawDeg` and `desiredYawDeg` so camera-facing changes are easier to inspect in probes.
+  - Updated the on-screen control legend in `index.html` to advertise `V` as the camera-align shortcut.
+  - Extended `scripts/city-stage-probe.mjs` to rotate the hero to a known facing, press `V`, and verify the camera yaw snaps behind the character while staying compatible with the city occlusion system.
+  - Re-verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+- Alley camera retune:
+  - Reworked the alley response in `src/main.js` so a squeezed follow view now promotes to an elevated fallback camera instead of collapsing the boom inward.
+  - Extended stage occlusion metadata with `topDownPitchDeg`, `topDownDistance`, and `topDownTriggerDistanceRatio`, then tuned the city stage to a `54 deg` / `20` unit fallback that stays clear in the known alley checkpoint while remaining less vertical than the first `58 deg` pass.
+  - Added camera telemetry mode/pitch reporting to `window.__TEST__.getState()` so probes can distinguish default follow view from the elevated alley fallback.
+  - Updated `scripts/city-stage-probe.mjs` to assert the alley checkpoint now uses the `alleyTopDown` camera mode, zooms out relative to the default city view, steepens the pitch, and returns to the default follow mode after recovery.
+  - Visual verification with alley screenshots showed the first `58 deg` / `24` unit fallback was functionally clear but too steep, so the final tuned values were stepped down to `54 deg` / `20`.
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+  - Tried to run the shared skill client at `~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`, but it failed in this environment because that skill-local script could not resolve the `playwright` package (`ERR_MODULE_NOT_FOUND`), so verification relied on the repo-local Playwright probes instead.

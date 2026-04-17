@@ -26,6 +26,10 @@ function planarDistance(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
+function angleDifferenceDeg(a, b) {
+  return Math.abs((((a - b) % 360) + 540) % 360 - 180);
+}
+
 try {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(() => window.__TEST__?.ready === true);
@@ -120,14 +124,24 @@ try {
   await page.waitForTimeout(220);
   const alleyState = await readState();
   assert.equal(alleyState.currentGround?.baseName, "mesh_76", "alley clamp point should still sit on a legal road mesh");
-  assert.equal(alleyState.camera.clamped, true, "tight alley checkpoint should clamp the camera boom");
+  assert.equal(alleyState.camera.mode, "alleyTopDown", "tight alley checkpoint should switch into the elevated alley camera");
   assert.ok(
-    alleyState.camera.clampedDistance < alleyState.camera.desiredDistance,
-    "camera clamp point should shorten the camera distance",
+    alleyState.camera.distance > initial.camera.distance,
+    "tight alley checkpoint should zoom the camera out instead of collapsing inward",
   );
   assert.ok(
-    alleyState.camera.activeOccluders.includes("mesh_77_14"),
-    "tight alley checkpoint should fade the remaining blocker mesh",
+    alleyState.camera.pitchDeg > initial.camera.pitchDeg,
+    "tight alley checkpoint should steepen the camera into a more top-down angle",
+  );
+  assert.equal(
+    alleyState.camera.clamped,
+    false,
+    "elevated alley camera should avoid the close boom clamp at the checkpoint",
+  );
+  assert.equal(
+    alleyState.camera.activeOccluders.length,
+    0,
+    "elevated alley camera should clear the alley blockers at the checkpoint",
   );
   await page.screenshot({ path: "artifacts/city-stage-alley-clamp.png" });
 
@@ -139,6 +153,7 @@ try {
     planarDistance(afterAlleyRecovery.heroPosition, initial.heroPosition) < 0.02,
     "camera recovery checkpoint should land back on the spawn road",
   );
+  assert.equal(afterAlleyRecovery.camera.mode, "default", "camera should return to the default follow mode after leaving the alley");
   assert.equal(
     afterAlleyRecovery.camera.activeOccluders.length,
     0,
@@ -198,6 +213,23 @@ try {
   assert.equal(afterRelease.pistolPresented, false, "releasing RMB should clear pistol stance");
   assert.equal(afterRelease.currentGround?.objectName != null, true, "combat should not break stage grounding");
 
+  const alignSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
+  assert.equal(alignSetup, true, "camera-align setup should land back on a legal road");
+  await page.waitForTimeout(180);
+  const beforeCameraAlign = await readState();
+  const expectedAlignedYawDeg = (beforeCameraAlign.rootYaw * 180) / Math.PI;
+  assert.ok(
+    angleDifferenceDeg(beforeCameraAlign.camera.yawDeg, expectedAlignedYawDeg) > 20,
+    "camera-align setup should start offset from the hero facing direction",
+  );
+  await page.keyboard.press("KeyV");
+  await page.waitForTimeout(120);
+  const afterCameraAlign = await readState();
+  assert.ok(
+    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, expectedAlignedYawDeg) < 2,
+    "V should align the camera behind the hero facing direction",
+  );
+
   console.log(
     JSON.stringify(
       {
@@ -205,6 +237,7 @@ try {
           stage: initial.stage,
           heroPosition: initial.heroPosition,
           currentGround: initial.currentGround,
+          camera: initial.camera,
         },
         routeDebugEnabled: {
           debug: routeDebugEnabled.debug,
@@ -247,6 +280,11 @@ try {
         pistolShoot: {
           currentClip: pistolShoot.currentClip,
           upperClip: pistolShoot.upperClip,
+        },
+        cameraAlign: {
+          before: beforeCameraAlign.camera,
+          after: afterCameraAlign.camera,
+          rootYaw: beforeCameraAlign.rootYaw,
         },
       },
       null,

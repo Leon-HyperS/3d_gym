@@ -348,6 +348,7 @@ const runtime = {
     staminaPercent: CONFIG.hudStaminaMax,
     slots: cloneHudSlotStates(),
   },
+  cameraYawDeg: null,
   aimPoint: new THREE.Vector3(0, CONFIG.ringY, 4),
   lastStatusUpdate: 0,
   closeGuardActive: false,
@@ -381,6 +382,7 @@ const tempGroundNormal = new THREE.Vector3();
 const tempSpawnPosition = new THREE.Vector3();
 const tempCameraOffset = new THREE.Vector3();
 const tempCameraDesiredPosition = new THREE.Vector3();
+const tempCameraFallbackPosition = new THREE.Vector3();
 const tempCameraDirection = new THREE.Vector3();
 const tempCameraRight = new THREE.Vector3();
 const tempCameraUp = new THREE.Vector3();
@@ -459,10 +461,14 @@ function createScene() {
   return scene;
 }
 
+function normalizeYawDegrees(value) {
+  return THREE.MathUtils.euclideanModulo(value, 360);
+}
+
 function getActiveCameraSettings() {
   const stageCamera = runtime.world?.stageData?.camera;
   return {
-    yawDeg: stageCamera?.yawDeg ?? CONFIG.cameraYawDeg,
+    yawDeg: runtime.cameraYawDeg ?? stageCamera?.yawDeg ?? CONFIG.cameraYawDeg,
     pitchDeg: stageCamera?.pitchDeg ?? CONFIG.cameraPitchDeg,
     distance: stageCamera?.distance ?? CONFIG.cameraDistance,
     targetHeight: stageCamera?.targetHeight ?? CONFIG.cameraTargetHeight,
@@ -494,9 +500,8 @@ function snapCameraToHero(hero) {
   runtime.cameraTarget.copy(hero.root.position);
   runtime.cameraTarget.y += camera.targetHeight;
   runtime.cameraLookTarget.copy(runtime.cameraTarget);
-  tempCameraPosition.copy(runtime.cameraTarget).add(getActiveCameraOffset());
-  getClampedCameraPosition(runtime.cameraTarget, tempCameraPosition);
-  runtime.camera.position.copy(tempCameraPosition);
+  const preferredView = resolvePreferredCameraView(runtime.cameraTarget, camera);
+  runtime.camera.position.copy(preferredView.position);
   const occluders = collectCameraOccluders(runtime.cameraLookTarget, runtime.camera.position);
   runtime.world.cameraTelemetry.activeOccluders = occluders.map((mesh) => mesh.name);
   updateOccluderFadeState(1 / 60, occluders);
@@ -506,6 +511,41 @@ function snapCameraToHero(hero) {
     runtime.controls.target.copy(runtime.cameraTarget);
     runtime.controls.update();
   }
+}
+
+function getHeroFacingCameraYawDeg(hero) {
+  if (!hero) {
+    return getActiveCameraSettings().yawDeg;
+  }
+
+  hero.model.getWorldDirection(tempWorldForward);
+  tempWorldForward.y = 0;
+  if (tempWorldForward.lengthSq() < 0.0001) {
+    return normalizeYawDegrees(THREE.MathUtils.radToDeg(hero.root.rotation.y));
+  }
+
+  tempWorldForward.normalize();
+  return normalizeYawDegrees(
+    THREE.MathUtils.radToDeg(Math.atan2(-tempWorldForward.x, -tempWorldForward.z)),
+  );
+}
+
+function alignCameraToHeroFacing() {
+  if (!runtime.hero) {
+    return;
+  }
+
+  runtime.cameraYawDeg = getHeroFacingCameraYawDeg(runtime.hero);
+  snapCameraToHero(runtime.hero);
+}
+
+function getTopDownOcclusionCameraSettings(baseCamera, world = runtime.world) {
+  return {
+    yawDeg: baseCamera.yawDeg,
+    pitchDeg: Math.max(baseCamera.pitchDeg, world?.stageData?.occlusion?.topDownPitchDeg ?? baseCamera.pitchDeg),
+    distance: Math.max(baseCamera.distance, world?.stageData?.occlusion?.topDownDistance ?? baseCamera.distance),
+    targetHeight: baseCamera.targetHeight,
+  };
 }
 
 function ensureOcclusionFadeMaterials(mesh) {
@@ -559,23 +599,38 @@ function updateOccluderFadeState(dt, desiredOccluders, world = runtime.world) {
   }
 }
 
-function getClampedCameraPosition(targetPosition, desiredPosition, world = runtime.world) {
+function getClampedCameraPosition(
+  targetPosition,
+  desiredPosition,
+  world = runtime.world,
+  { telemetry = true } = {},
+) {
   if (!world?.stageData?.occlusion?.enabled || world.cameraOcclusionMeshes.length === 0) {
-    if (world?.cameraTelemetry) {
+    if (telemetry && world?.cameraTelemetry) {
       world.cameraTelemetry.desiredDistance = desiredPosition.distanceTo(targetPosition);
       world.cameraTelemetry.clampedDistance = world.cameraTelemetry.desiredDistance;
     }
-    return desiredPosition;
+    return {
+      position: desiredPosition,
+      desiredDistance: desiredPosition.distanceTo(targetPosition),
+      clampedDistance: desiredPosition.distanceTo(targetPosition),
+      clamped: false,
+    };
   }
 
   tempCameraDirection.subVectors(desiredPosition, targetPosition);
   const desiredDistance = tempCameraDirection.length();
   if (desiredDistance < 0.0001) {
-    if (world.cameraTelemetry) {
+    if (telemetry && world.cameraTelemetry) {
       world.cameraTelemetry.desiredDistance = desiredDistance;
       world.cameraTelemetry.clampedDistance = desiredDistance;
     }
-    return desiredPosition;
+    return {
+      position: desiredPosition,
+      desiredDistance,
+      clampedDistance: desiredDistance,
+      clamped: false,
+    };
   }
 
   tempCameraDirection.normalize();
@@ -618,12 +673,82 @@ function getClampedCameraPosition(targetPosition, desiredPosition, world = runti
     world.stageData.occlusion.minDistance,
     desiredDistance,
   );
-  if (world.cameraTelemetry) {
+  if (telemetry && world.cameraTelemetry) {
     world.cameraTelemetry.desiredDistance = desiredDistance;
     world.cameraTelemetry.clampedDistance = clampedDistance;
   }
 
-  return desiredPosition.copy(targetPosition).addScaledVector(tempCameraDirection, clampedDistance);
+  desiredPosition.copy(targetPosition).addScaledVector(tempCameraDirection, clampedDistance);
+  return {
+    position: desiredPosition,
+    desiredDistance,
+    clampedDistance,
+    clamped: clampedDistance < desiredDistance - 0.05,
+  };
+}
+
+function resolvePreferredCameraView(targetPosition, baseCamera, world = runtime.world) {
+  tempCameraDesiredPosition.copy(targetPosition).add(
+    makeCameraOffset(baseCamera.yawDeg, baseCamera.pitchDeg, baseCamera.distance),
+  );
+  const baseCandidate = getClampedCameraPosition(
+    targetPosition,
+    tempCameraDesiredPosition,
+    world,
+    { telemetry: false },
+  );
+  const baseRatio = baseCandidate.desiredDistance > 0
+    ? baseCandidate.clampedDistance / baseCandidate.desiredDistance
+    : 1;
+  const selectedBase = {
+    ...baseCandidate,
+    mode: "default",
+    desiredYawDeg: normalizeYawDegrees(baseCamera.yawDeg),
+    desiredPitchDeg: baseCamera.pitchDeg,
+  };
+
+  if (
+    !world?.stageData?.occlusion?.enabled ||
+    baseRatio >= world.stageData.occlusion.topDownTriggerDistanceRatio
+  ) {
+    if (world?.cameraTelemetry) {
+      world.cameraTelemetry.mode = selectedBase.mode;
+      world.cameraTelemetry.desiredYawDeg = selectedBase.desiredYawDeg;
+      world.cameraTelemetry.desiredPitchDeg = selectedBase.desiredPitchDeg;
+      world.cameraTelemetry.desiredDistance = selectedBase.desiredDistance;
+      world.cameraTelemetry.clampedDistance = selectedBase.clampedDistance;
+    }
+    return selectedBase;
+  }
+
+  const topDownCamera = getTopDownOcclusionCameraSettings(baseCamera, world);
+  tempCameraFallbackPosition.copy(targetPosition).add(
+    makeCameraOffset(topDownCamera.yawDeg, topDownCamera.pitchDeg, topDownCamera.distance),
+  );
+  const topDownCandidate = getClampedCameraPosition(
+    targetPosition,
+    tempCameraFallbackPosition,
+    world,
+    { telemetry: false },
+  );
+  const topDownSelected = {
+    ...topDownCandidate,
+    mode: "alleyTopDown",
+    desiredYawDeg: normalizeYawDegrees(topDownCamera.yawDeg),
+    desiredPitchDeg: topDownCamera.pitchDeg,
+  };
+  const useTopDown =
+    topDownSelected.clampedDistance >= selectedBase.clampedDistance - 0.35 ||
+    topDownSelected.desiredDistance > selectedBase.desiredDistance + 0.5;
+  const selected = useTopDown ? topDownSelected : selectedBase;
+  if (world?.cameraTelemetry) {
+    world.cameraTelemetry.mode = selected.mode;
+    world.cameraTelemetry.desiredYawDeg = selected.desiredYawDeg;
+    world.cameraTelemetry.desiredPitchDeg = selected.desiredPitchDeg;
+    world.cameraTelemetry.desiredDistance = selected.desiredDistance;
+    world.cameraTelemetry.clampedDistance = selected.clampedDistance;
+  }
+  return selected;
 }
 
 function collectCameraOccluders(from, to, world = runtime.world) {
@@ -836,6 +961,9 @@ function bindKeyboard() {
         break;
       case "KeyF":
         runtime.input.parryModifier = true;
+        break;
+      case "KeyV":
+        alignCameraToHeroFacing();
         break;
       case "F1":
         hideMenusAndClearDebug();
@@ -1283,6 +1411,9 @@ function normalizeStageOcclusion(occlusion, label) {
       probeRadius: 0.7,
       fadeOpacity: 0.16,
       fadeLerp: 12,
+      topDownPitchDeg: 54,
+      topDownDistance: 20,
+      topDownTriggerDistanceRatio: 0.9,
     };
   }
 
@@ -1297,6 +1428,12 @@ function normalizeStageOcclusion(occlusion, label) {
     probeRadius: normalizeFiniteNumber(occlusion.probeRadius ?? 0.7, `${label}.probeRadius`),
     fadeOpacity: normalizeFiniteNumber(occlusion.fadeOpacity ?? 0.16, `${label}.fadeOpacity`),
     fadeLerp: normalizeFiniteNumber(occlusion.fadeLerp ?? 12, `${label}.fadeLerp`),
+    topDownPitchDeg: normalizeFiniteNumber(occlusion.topDownPitchDeg ?? 54, `${label}.topDownPitchDeg`),
+    topDownDistance: normalizeFiniteNumber(occlusion.topDownDistance ?? 20, `${label}.topDownDistance`),
+    topDownTriggerDistanceRatio: normalizeFiniteNumber(
+      occlusion.topDownTriggerDistanceRatio ?? 0.9,
+      `${label}.topDownTriggerDistanceRatio`,
+    ),
   };
 
   if (normalized.collisionBuffer < 0 || normalized.minDistance <= 0 || normalized.probeRadius < 0) {
@@ -1307,6 +1444,18 @@ function normalizeStageOcclusion(occlusion, label) {
   }
   if (normalized.fadeLerp <= 0) {
     throw new Error(`${label}.fadeLerp must be greater than 0`);
+  }
+  if (normalized.topDownPitchDeg <= 0 || normalized.topDownPitchDeg >= 89) {
+    throw new Error(`${label}.topDownPitchDeg must be between 0 and 89`);
+  }
+  if (normalized.topDownDistance <= 0) {
+    throw new Error(`${label}.topDownDistance must be greater than 0`);
+  }
+  if (
+    normalized.topDownTriggerDistanceRatio <= 0 ||
+    normalized.topDownTriggerDistanceRatio >= 1
+  ) {
+    throw new Error(`${label}.topDownTriggerDistanceRatio must be between 0 and 1`);
   }
 
   return normalized;
@@ -2698,6 +2847,9 @@ async function createGymLevel(scene, renderer, stageData = null) {
       activeCameraOccluders: new Map(),
       forcedCameraOccluders: [],
       cameraTelemetry: {
+        mode: "default",
+        desiredYawDeg: 0,
+        desiredPitchDeg: 0,
         desiredDistance: 0,
         clampedDistance: 0,
         activeOccluders: [],
@@ -2764,6 +2916,9 @@ async function createGymLevel(scene, renderer, stageData = null) {
     activeCameraOccluders: new Map(),
     forcedCameraOccluders: [],
     cameraTelemetry: {
+      mode: "default",
+      desiredYawDeg: 0,
+      desiredPitchDeg: 0,
       desiredDistance: 0,
       clampedDistance: 0,
       activeOccluders: [],
@@ -3704,9 +3859,8 @@ function updateCamera(dt) {
 
   runtime.controls.enabled = false;
   runtime.cameraLookTarget.lerp(runtime.cameraTarget, 1 - Math.exp(-dt * CONFIG.cameraLerp));
-  tempCameraDesiredPosition.copy(runtime.cameraTarget).add(getActiveCameraOffset());
-  getClampedCameraPosition(runtime.cameraTarget, tempCameraDesiredPosition);
-  runtime.camera.position.lerp(tempCameraDesiredPosition, 1 - Math.exp(-dt * CONFIG.cameraLerp));
+  const preferredView = resolvePreferredCameraView(runtime.cameraTarget, camera);
+  runtime.camera.position.lerp(preferredView.position, 1 - Math.exp(-dt * CONFIG.cameraLerp));
   const occluders = collectCameraOccluders(runtime.cameraLookTarget, runtime.camera.position);
   for (const mesh of runtime.world.forcedCameraOccluders) {
     if (!occluders.includes(mesh)) {
@@ -4385,6 +4539,23 @@ function getTestState() {
 
   const desiredCameraDistance = getActiveCameraOffset(tempCameraOffset).length();
   const currentCameraDistance = runtime.camera.position.distanceTo(runtime.cameraTarget);
+  const currentCameraYawDeg = normalizeYawDegrees(
+    THREE.MathUtils.radToDeg(
+      Math.atan2(
+        runtime.camera.position.x - runtime.cameraTarget.x,
+        runtime.camera.position.z - runtime.cameraTarget.z,
+      ),
+    ),
+  );
+  const currentCameraPitchDeg = THREE.MathUtils.radToDeg(
+    Math.atan2(
+      runtime.camera.position.y - runtime.cameraTarget.y,
+      Math.hypot(
+        runtime.camera.position.x - runtime.cameraTarget.x,
+        runtime.camera.position.z - runtime.cameraTarget.z,
+      ),
+    ),
+  );
 
   return {
     ready: true,
@@ -4443,6 +4614,11 @@ function getTestState() {
       distance: currentCameraDistance,
       desiredDistance: runtime.world.cameraTelemetry?.desiredDistance ?? desiredCameraDistance,
       clampedDistance: runtime.world.cameraTelemetry?.clampedDistance ?? desiredCameraDistance,
+      yawDeg: currentCameraYawDeg,
+      desiredYawDeg: runtime.world.cameraTelemetry?.desiredYawDeg ?? normalizeYawDegrees(getActiveCameraSettings().yawDeg),
+      pitchDeg: currentCameraPitchDeg,
+      desiredPitchDeg: runtime.world.cameraTelemetry?.desiredPitchDeg ?? getActiveCameraSettings().pitchDeg,
+      mode: runtime.world.cameraTelemetry?.mode ?? "default",
       clamped:
         (runtime.world.cameraTelemetry?.clampedDistance ?? desiredCameraDistance) <
         (runtime.world.cameraTelemetry?.desiredDistance ?? desiredCameraDistance) - 0.05,
