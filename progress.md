@@ -195,3 +195,40 @@ Original prompt: inspect the repo and understands how the assets are being lever
     - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
     - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
   - Retried the shared skill client at `C:\Users\leonl\.codex\skills\develop-web-game\scripts\web_game_playwright_client.js`; it still fails in this environment with `ERR_MODULE_NOT_FOUND` for `playwright`, so the repo-local Playwright probes remain the reliable verification path here.
+- RMB pistol-stance auto-pan:
+  - Added `setPistolStanceActive()` in `src/main.js` so entering pistol stance is treated as a single transition instead of scattered boolean writes across pointer handlers.
+  - Hooked that transition into the existing `V` recenter helper so pressing and holding RMB now automatically triggers the same player-front recenter flow and smooth camera pan that `V` uses, but only on stance entry so it does not keep fighting the mouse while aim is already held.
+  - Updated the pointer handlers to route `mousedown`/`mouseup`/`pointercancel`/`blur` pistol-stance changes through that shared transition helper.
+  - Expanded `scripts/city-stage-probe.mjs` so the pistol stance regression now:
+    - starts from an offset camera/facing setup
+    - enters pistol stance through a real RMB input event
+    - verifies the camera begins the same eased pan as `V`
+    - verifies the hero is immediately facing player-front for the target camera angle
+    - verifies the crosshair recenters to the viewport middle
+    - verifies the camera keeps progressing toward the target while pistol stance is active
+    - still verifies LMB shooting and RMB release behavior afterward
+  - Visual verification:
+    - `artifacts/city-stage-pistol-pan.png` shows the recentered pistol stance with the crosshair centered and the hero already aligned under the new camera heading
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+  - Retried the shared skill client at `C:\Users\leonl\.codex\skills\develop-web-game\scripts\web_game_playwright_client.js`; it still fails here with `ERR_MODULE_NOT_FOUND` for `playwright`, so the repo-local Playwright probes remain the reliable verification path in this environment.
+- W + RMB pan-stability fix:
+  - Investigated the reported occasional 180 on `forward + RMB` and confirmed the problem was the new auto-pan recenter path fighting the normal screen-space aim solver while the camera yaw was still in flight.
+  - Added `runtime.suppressAimYawUntilCameraSettled` plus a small `cameraYawSettleToleranceDeg` threshold in `src/main.js`. The recenter helper now arms this suppression whenever it starts an auto-pan, and `updateAimTarget()` temporarily skips aim-driven yaw updates until the current camera yaw is close enough to the target yaw.
+  - Kept the camera pan and crosshair recenter behavior intact; only the aim-driven facing updates are paused during the early pan window, which prevents the hero from whipping around while `W` movement and the panning camera are changing the screen-space aim frame underneath the player.
+  - Exposed `aimYawSuppressed` through `window.__TEST__.getState()` for targeted regression coverage.
+  - Expanded `scripts/city-stage-probe.mjs` so the pistol-stance regression now covers the exact failure case:
+    - hold `W`
+    - press RMB from an off-center aim setup
+    - assert the camera still starts panning
+    - assert `aimYawSuppressed` is active during the early pan
+    - assert the hero yaw stays close to the pre-RMB facing instead of swinging into a large flip
+  - Visual verification:
+    - refreshed `artifacts/city-stage-pistol-pan.png` after the fix; the stance now reads stable while the camera finishes settling
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
+  - Retried the shared skill client at `C:\Users\leonl\.codex\skills\develop-web-game\scripts\web_game_playwright_client.js`; it still fails here with `ERR_MODULE_NOT_FOUND` for `playwright`, so the repo-local probes remain the reliable verification path in this environment.

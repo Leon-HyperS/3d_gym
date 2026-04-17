@@ -48,6 +48,40 @@ async function movePointer(clientX, clientY) {
   );
 }
 
+async function mouseDown(button, buttons, clientX, clientY) {
+  await page.evaluate(
+    ([nextButton, nextButtons, nextX, nextY]) => {
+      const target = document.body;
+      target.dispatchEvent(new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: nextButton,
+        buttons: nextButtons,
+        clientX: nextX,
+        clientY: nextY,
+      }));
+    },
+    [button, buttons, clientX, clientY],
+  );
+}
+
+async function mouseUp(button, buttons, clientX, clientY) {
+  await page.evaluate(
+    ([nextButton, nextButtons, nextX, nextY]) => {
+      const target = document.body;
+      target.dispatchEvent(new MouseEvent("mouseup", {
+        bubbles: true,
+        cancelable: true,
+        button: nextButton,
+        buttons: nextButtons,
+        clientX: nextX,
+        clientY: nextY,
+      }));
+    },
+    [button, buttons, clientX, clientY],
+  );
+}
+
 try {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(() => window.__TEST__?.ready === true);
@@ -258,54 +292,79 @@ try {
     "faded alley blockers should recover once the hero leaves the obstruction",
   );
 
-  await page.evaluate(() => {
-    const target = document.body;
-    target.dispatchEvent(new PointerEvent("pointermove", {
-      bubbles: true,
-      clientX: 720,
-      clientY: 450,
-    }));
-    target.dispatchEvent(new MouseEvent("mousedown", {
-      bubbles: true,
-      cancelable: true,
-      button: 2,
-      buttons: 2,
-      clientX: 720,
-      clientY: 450,
-    }));
-  });
-  await page.waitForTimeout(180);
+  const pistolPanSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
+  assert.equal(pistolPanSetup, true, "pistol stance pan setup should land back on a legal road");
+  await movePointer(1090, 260);
+  await page.waitForTimeout(220);
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(200);
+  const beforePistolPan = await readState();
+  assert.ok(
+    angleDifferenceDeg(beforePistolPan.camera.yawDeg, normalizeYawDeg((beforePistolPan.rootYaw * 180) / Math.PI + 180)) > 20,
+    "pistol stance pan setup should start with the camera offset from the recentered behind-the-hero angle",
+  );
+
+  await mouseDown(2, 2, 1090, 260);
+  await page.waitForTimeout(80);
   const pistolStance = await readState();
+  const expectedPistolFrontYawDeg = normalizeYawDeg(pistolStance.camera.targetYawDeg + 180);
   assert.equal(pistolStance.pistolPresented, true, "RMB should still present the pistol stance");
   assert.equal(pistolStance.pistolAttachment?.visible, true, "pistol mesh should be visible in stance");
+  assert.ok(
+    angleDifferenceDeg(pistolStance.camera.yawDeg, beforePistolPan.camera.yawDeg) > 2,
+    "entering pistol stance should start the same camera pan as V",
+  );
+  assert.ok(
+    angleDifferenceDeg(pistolStance.camera.yawDeg, pistolStance.camera.targetYawDeg) > 4,
+    "pistol stance camera recenter should ease instead of snapping in one frame",
+  );
+  assert.ok(
+    angleDifferenceDeg((pistolStance.rootYaw * 180) / Math.PI, expectedPistolFrontYawDeg) < 2,
+    "entering pistol stance should immediately rotate the hero to player-front for the target camera angle",
+  );
+  assert.ok(
+    Math.abs(pistolStance.mouse.x - 720) < 1 &&
+    Math.abs(pistolStance.mouse.y - 450) < 1,
+    "entering pistol stance should recenter the crosshair",
+  );
+  assert.equal(
+    pistolStance.aimYawSuppressed,
+    true,
+    "entering pistol stance should temporarily suppress aim-driven yaw while the camera pan settles",
+  );
+  assert.ok(
+    angleDifferenceDeg((pistolStance.rootYaw * 180) / Math.PI, (beforePistolPan.rootYaw * 180) / Math.PI) < 10,
+    "W plus RMB should keep the hero from whipping into a large yaw flip during the first pan frames",
+  );
 
-  await page.evaluate(() => {
-    const target = document.body;
-    target.dispatchEvent(new MouseEvent("mousedown", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-      buttons: 3,
-      clientX: 720,
-      clientY: 450,
-    }));
-  });
+  await page.waitForTimeout(320);
+  const pistolForwardHold = await readState();
+  assert.equal(
+    pistolForwardHold.aimYawSuppressed,
+    true,
+    "W plus RMB should keep aim-yaw suppression active while the recenter pan is still settling",
+  );
+  assert.ok(
+    angleDifferenceDeg((pistolForwardHold.rootYaw * 180) / Math.PI, (beforePistolPan.rootYaw * 180) / Math.PI) < 15,
+    "W plus RMB should keep the hero yaw stable through the early pan instead of spinning around",
+  );
+  await page.keyboard.up("KeyW");
+  await page.waitForTimeout(200);
+  const afterPistolPan = await readState();
+  assert.ok(
+    angleDifferenceDeg(afterPistolPan.camera.yawDeg, afterPistolPan.camera.targetYawDeg)
+      < angleDifferenceDeg(pistolStance.camera.yawDeg, pistolStance.camera.targetYawDeg),
+    "pistol stance camera should keep panning closer to the target angle over time",
+  );
+  await page.screenshot({ path: "artifacts/city-stage-pistol-pan.png" });
+
+  await mouseDown(0, 3, 720, 450);
   await page.waitForTimeout(100);
   const pistolShoot = await readState();
   assert.equal(pistolShoot.upperClip, "Pistol_Shoot", "LMB in pistol stance should still fire");
   assert.equal(pistolShoot.pistolAttachment?.visible, true, "pistol should remain visible while shooting");
 
-  await page.evaluate(() => {
-    const target = document.body;
-    target.dispatchEvent(new MouseEvent("mouseup", {
-      bubbles: true,
-      cancelable: true,
-      button: 2,
-      buttons: 0,
-      clientX: 720,
-      clientY: 450,
-    }));
-  });
+  await mouseUp(2, 0, 720, 450);
   await page.waitForTimeout(220);
   const afterRelease = await readState();
   assert.equal(afterRelease.pistolPresented, false, "releasing RMB should clear pistol stance");
@@ -428,8 +487,16 @@ try {
           camera: afterAlleyRecovery.camera,
         },
         pistolStance: {
+          before: beforePistolPan.camera,
+          during: pistolStance.camera,
+          forwardHold: pistolForwardHold.camera,
+          after: afterPistolPan.camera,
           currentClip: pistolStance.currentClip,
           pistolPresented: pistolStance.pistolPresented,
+          rootYaw: pistolStance.rootYaw,
+          forwardHoldRootYaw: pistolForwardHold.rootYaw,
+          aimYawSuppressed: pistolStance.aimYawSuppressed,
+          mouse: pistolStance.mouse,
         },
         pistolShoot: {
           currentClip: pistolShoot.currentClip,

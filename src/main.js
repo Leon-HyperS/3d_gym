@@ -41,6 +41,7 @@ const CONFIG = {
   cameraOffset: makeCameraOffset(45, 40, 12.4),
   cameraLerp: 7.5,
   cameraYawPanLerp: 8.5,
+  cameraYawSettleToleranceDeg: 2.5,
   cameraTargetHeight: 1.35,
   turnLerp: 10.5,
   baseYawOffset: Math.PI,
@@ -351,6 +352,7 @@ const runtime = {
   },
   cameraYawDeg: null,
   cameraYawTargetDeg: null,
+  suppressAimYawUntilCameraSettled: false,
   aimPoint: new THREE.Vector3(0, CONFIG.ringY, 4),
   lastStatusUpdate: 0,
   closeGuardActive: false,
@@ -467,6 +469,10 @@ function normalizeYawDegrees(value) {
   return THREE.MathUtils.euclideanModulo(value, 360);
 }
 
+function getAngleDifferenceDegrees(a, b) {
+  return Math.abs((((a - b) % 360) + 540) % 360 - 180);
+}
+
 function getBaseCameraYawDeg() {
   return runtime.world?.stageData?.camera?.yawDeg ?? CONFIG.cameraYawDeg;
 }
@@ -551,6 +557,28 @@ function getPlayerFrontYawForCameraYaw(cameraYawDeg) {
   return THREE.MathUtils.degToRad(normalizeYawDegrees(cameraYawDeg + 180));
 }
 
+function shouldSuppressAimYawForCameraPan() {
+  if (!runtime.suppressAimYawUntilCameraSettled) {
+    return false;
+  }
+
+  syncCameraYawState(0);
+  if (runtime.cameraYawDeg == null || runtime.cameraYawTargetDeg == null) {
+    runtime.suppressAimYawUntilCameraSettled = false;
+    return false;
+  }
+
+  if (
+    getAngleDifferenceDegrees(runtime.cameraYawDeg, runtime.cameraYawTargetDeg) <=
+    CONFIG.cameraYawSettleToleranceDeg
+  ) {
+    runtime.suppressAimYawUntilCameraSettled = false;
+    return false;
+  }
+
+  return true;
+}
+
 function snapCameraAndFacePlayerFront() {
   const hero = runtime.hero;
   if (!hero) {
@@ -566,8 +594,22 @@ function snapCameraAndFacePlayerFront() {
   hero.lastMoveDirection.set(Math.sin(targetYaw), 0, Math.cos(targetYaw));
   hero.rollDirection.copy(hero.lastMoveDirection);
   resetAimPointFromHero(hero);
+  runtime.suppressAimYawUntilCameraSettled = true;
   runtime.mouse.overUi = false;
   updatePointerFromClient(window.innerWidth * 0.5, window.innerHeight * 0.5);
+}
+
+function setPistolStanceActive(nextActive) {
+  const active = Boolean(nextActive);
+  if (runtime.input.pistolStance === active) {
+    return false;
+  }
+
+  runtime.input.pistolStance = active;
+  if (active) {
+    snapCameraAndFacePlayerFront();
+  }
+  return true;
 }
 
 function getTopDownOcclusionCameraSettings(baseCamera, world = runtime.world) {
@@ -1105,18 +1147,18 @@ function bindPointer() {
 
     if (event.button === 2) {
       event.preventDefault();
-      runtime.input.pistolStance = true;
+      setPistolStanceActive(true);
     }
   });
 
   window.addEventListener("mouseup", (event) => {
     if (event.button === 2) {
-      runtime.input.pistolStance = false;
+      setPistolStanceActive(false);
     }
   });
 
   window.addEventListener("pointercancel", () => {
-    runtime.input.pistolStance = false;
+    setPistolStanceActive(false);
   });
 
   window.addEventListener("pointermove", (event) => {
@@ -1134,7 +1176,7 @@ function bindPointer() {
   });
 
   window.addEventListener("blur", () => {
-    runtime.input.pistolStance = false;
+    setPistolStanceActive(false);
     runtime.input.parryModifier = false;
     setCloseGuardModifierHeld(false);
   });
@@ -3734,6 +3776,10 @@ function updateAimTarget(dt) {
     return;
   }
 
+  if (shouldSuppressAimYawForCameraPan()) {
+    return;
+  }
+
   const camera = getActiveCameraSettings();
   tempScreenPoint.copy(runtime.hero.root.position);
   tempScreenPoint.y += camera.targetHeight;
@@ -4704,6 +4750,7 @@ function getTestState() {
     actionLock: runtime.hero.actionLock,
     upperBodyActionLock: runtime.hero.upperBodyActionLock,
     rollTimeLeft: runtime.hero.rollTimeLeft,
+    aimYawSuppressed: runtime.suppressAimYawUntilCameraSettled,
     sprintModifier: runtime.input.sprintModifier,
     crouchModifier: runtime.input.crouchModifier,
     pistolStance: runtime.input.pistolStance,
