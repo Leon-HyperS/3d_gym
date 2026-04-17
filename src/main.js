@@ -320,6 +320,7 @@ const runtime = {
     vectors: true,
     hitboxes: false,
     orbit: false,
+    route: false,
   },
   input: {
     forward: false,
@@ -375,11 +376,25 @@ const tempAttachmentProjectedForward = new THREE.Vector3();
 const tempAttachmentProjectedUp = new THREE.Vector3();
 const tempAttachmentProjectedDesiredUp = new THREE.Vector3();
 const tempAttachmentCross = new THREE.Vector3();
+const tempGroundRayOrigin = new THREE.Vector3();
+const tempGroundNormal = new THREE.Vector3();
+const tempSpawnPosition = new THREE.Vector3();
+const tempCameraOffset = new THREE.Vector3();
+const tempCameraDesiredPosition = new THREE.Vector3();
+const tempCameraDirection = new THREE.Vector3();
+const tempCameraRight = new THREE.Vector3();
+const tempCameraUp = new THREE.Vector3();
+const tempCameraOrigin = new THREE.Vector3();
+const tempCameraSideOffset = new THREE.Vector3();
+const tempCameraMatrix = new THREE.Matrix4();
+const tempCameraBounds = new THREE.Box3();
 
 window.__TEST__ = {
   ready: false,
   getState: () => getTestState(),
   setHudStaminaPercent: (value) => setHudStaminaPercent(value),
+  teleportHero: (x, z, yawDeg = null) => teleportHeroForTest(x, z, yawDeg),
+  setForcedCameraOccluders: (names) => setForcedCameraOccludersForTest(names),
 };
 
 init().catch((error) => {
@@ -394,7 +409,6 @@ async function init() {
   runtime.scene = createScene();
   runtime.camera = createCamera();
   runtime.controls = createControls(runtime.camera, runtime.renderer.domElement);
-  runtime.world = createGymLevel(runtime.scene, runtime.renderer);
 
   dom.app.appendChild(runtime.renderer.domElement);
 
@@ -404,17 +418,27 @@ async function init() {
   window.addEventListener("resize", handleResize);
   handleResize();
 
-  const assetCatalog = await loadAssetContract();
+  const [assetCatalog, stageCatalog] = await Promise.all([
+    loadAssetContract(),
+    loadStageCatalog(),
+  ]);
   runtime.asset = assetCatalog.asset;
   runtime.uiPacks = assetCatalog.uiPacks;
+  runtime.world = await createGymLevel(runtime.scene, runtime.renderer, stageCatalog?.defaultStage ?? null);
+  applyActiveCameraControls();
   applyHudAssetPack(getDefaultHudPack(runtime.uiPacks));
   renderHud();
   runtime.hero = await loadHero(runtime.scene, runtime.asset);
+  placeHeroAtStageSpawn(runtime.hero);
+  snapCameraToHero(runtime.hero);
   applyDebugVisibility();
   syncGroundedAnimation(runtime.hero, true);
   window.__TEST__.ready = true;
 
-  showToast("Debug Gym ready. RMB / WASD / Shift / Ctrl / Space", 2600);
+  showToast(
+    `${runtime.world?.stageData?.displayName ?? "Debug Gym"} ready. RMB / WASD / Shift / Ctrl / Space`,
+    2600,
+  );
   runtime.clock.start();
   runtime.renderer.setAnimationLoop(updateFrame);
 }
@@ -435,10 +459,206 @@ function createScene() {
   return scene;
 }
 
+function getActiveCameraSettings() {
+  const stageCamera = runtime.world?.stageData?.camera;
+  return {
+    yawDeg: stageCamera?.yawDeg ?? CONFIG.cameraYawDeg,
+    pitchDeg: stageCamera?.pitchDeg ?? CONFIG.cameraPitchDeg,
+    distance: stageCamera?.distance ?? CONFIG.cameraDistance,
+    targetHeight: stageCamera?.targetHeight ?? CONFIG.cameraTargetHeight,
+  };
+}
+
+function getActiveCameraOffset(target = tempCameraOffset) {
+  const camera = getActiveCameraSettings();
+  target.copy(makeCameraOffset(camera.yawDeg, camera.pitchDeg, camera.distance));
+  return target;
+}
+
+function applyActiveCameraControls() {
+  if (!runtime.controls) {
+    return;
+  }
+
+  const camera = getActiveCameraSettings();
+  runtime.controls.maxDistance = Math.max(16, camera.distance * 1.6);
+  runtime.controls.target.set(0, camera.targetHeight, 0);
+}
+
+function snapCameraToHero(hero) {
+  if (!hero || !runtime.camera) {
+    return;
+  }
+
+  const camera = getActiveCameraSettings();
+  runtime.cameraTarget.copy(hero.root.position);
+  runtime.cameraTarget.y += camera.targetHeight;
+  runtime.cameraLookTarget.copy(runtime.cameraTarget);
+  tempCameraPosition.copy(runtime.cameraTarget).add(getActiveCameraOffset());
+  getClampedCameraPosition(runtime.cameraTarget, tempCameraPosition);
+  runtime.camera.position.copy(tempCameraPosition);
+  const occluders = collectCameraOccluders(runtime.cameraLookTarget, runtime.camera.position);
+  runtime.world.cameraTelemetry.activeOccluders = occluders.map((mesh) => mesh.name);
+  updateOccluderFadeState(1 / 60, occluders);
+  runtime.camera.lookAt(runtime.cameraLookTarget);
+
+  if (runtime.controls) {
+    runtime.controls.target.copy(runtime.cameraTarget);
+    runtime.controls.update();
+  }
+}
+
+function ensureOcclusionFadeMaterials(mesh) {
+  if (!mesh.userData.occlusionFadeMaterials) {
+    const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const clonedMaterials = sourceMaterials.map((material) => material.clone());
+    mesh.userData.occlusionFadeMaterials = Array.isArray(mesh.material)
+      ? clonedMaterials
+      : clonedMaterials[0];
+    mesh.material = mesh.userData.occlusionFadeMaterials;
+  }
+
+  return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+}
+
+function updateOccluderFadeState(dt, desiredOccluders, world = runtime.world) {
+  if (!world?.stageData?.occlusion?.enabled) {
+    return;
+  }
+
+  const fadeStep = 1 - Math.exp(-dt * world.stageData.occlusion.fadeLerp);
+
+  for (const state of world.activeCameraOccluders.values()) {
+    state.targetOpacity = 1;
+  }
+
+  for (const mesh of desiredOccluders) {
+    let state = world.activeCameraOccluders.get(mesh);
+    if (!state) {
+      state = { targetOpacity: 1 };
+      world.activeCameraOccluders.set(mesh, state);
+    }
+    state.targetOpacity = world.stageData.occlusion.fadeOpacity;
+    ensureOcclusionFadeMaterials(mesh);
+  }
+
+  for (const [mesh, state] of world.activeCameraOccluders.entries()) {
+    const materials = ensureOcclusionFadeMaterials(mesh);
+    let shouldKeep = state.targetOpacity < 0.999;
+    for (const material of materials) {
+      const nextOpacity = THREE.MathUtils.lerp(material.opacity, state.targetOpacity, fadeStep);
+      material.opacity = nextOpacity;
+      material.transparent = nextOpacity < 0.999;
+      material.depthWrite = nextOpacity >= 0.999;
+      shouldKeep ||= nextOpacity < 0.995;
+    }
+
+    if (!shouldKeep) {
+      world.activeCameraOccluders.delete(mesh);
+    }
+  }
+}
+
+function getClampedCameraPosition(targetPosition, desiredPosition, world = runtime.world) {
+  if (!world?.stageData?.occlusion?.enabled || world.cameraOcclusionMeshes.length === 0) {
+    if (world?.cameraTelemetry) {
+      world.cameraTelemetry.desiredDistance = desiredPosition.distanceTo(targetPosition);
+      world.cameraTelemetry.clampedDistance = world.cameraTelemetry.desiredDistance;
+    }
+    return desiredPosition;
+  }
+
+  tempCameraDirection.subVectors(desiredPosition, targetPosition);
+  const desiredDistance = tempCameraDirection.length();
+  if (desiredDistance < 0.0001) {
+    if (world.cameraTelemetry) {
+      world.cameraTelemetry.desiredDistance = desiredDistance;
+      world.cameraTelemetry.clampedDistance = desiredDistance;
+    }
+    return desiredPosition;
+  }
+
+  tempCameraDirection.normalize();
+  tempCameraRight.crossVectors(tempCameraDirection, UP);
+  if (tempCameraRight.lengthSq() < 0.0001) {
+    tempCameraRight.set(1, 0, 0);
+  } else {
+    tempCameraRight.normalize();
+  }
+  tempCameraUp.crossVectors(tempCameraRight, tempCameraDirection).normalize();
+
+  const probeRadius = world.stageData.occlusion.probeRadius;
+  const sampleOffsets = [
+    [0, 0],
+    [probeRadius, 0],
+    [-probeRadius, 0],
+    [0, probeRadius * 0.7],
+    [0, -probeRadius * 0.45],
+  ];
+
+  let clampedDistance = desiredDistance;
+  for (const [rightScale, upScale] of sampleOffsets) {
+    tempCameraOrigin.copy(targetPosition);
+    tempCameraSideOffset
+      .copy(tempCameraRight)
+      .multiplyScalar(rightScale)
+      .addScaledVector(tempCameraUp, upScale);
+    tempCameraOrigin.add(tempCameraSideOffset);
+
+    world.cameraRaycaster.set(tempCameraOrigin, tempCameraDirection);
+    world.cameraRaycaster.far = desiredDistance;
+    const hit = world.cameraRaycaster.intersectObjects(world.cameraOcclusionMeshes, false)[0];
+    if (hit) {
+      clampedDistance = Math.min(clampedDistance, hit.distance - world.stageData.occlusion.collisionBuffer);
+    }
+  }
+
+  clampedDistance = THREE.MathUtils.clamp(
+    clampedDistance,
+    world.stageData.occlusion.minDistance,
+    desiredDistance,
+  );
+  if (world.cameraTelemetry) {
+    world.cameraTelemetry.desiredDistance = desiredDistance;
+    world.cameraTelemetry.clampedDistance = clampedDistance;
+  }
+
+  return desiredPosition.copy(targetPosition).addScaledVector(tempCameraDirection, clampedDistance);
+}
+
+function collectCameraOccluders(from, to, world = runtime.world) {
+  if (!world?.stageData?.occlusion?.enabled || world.cameraOcclusionMeshes.length === 0) {
+    return [];
+  }
+
+  tempCameraDirection.subVectors(to, from);
+  const distance = tempCameraDirection.length();
+  if (distance < 0.0001) {
+    return [];
+  }
+
+  tempCameraDirection.normalize();
+  world.cameraRaycaster.set(from, tempCameraDirection);
+  world.cameraRaycaster.far = distance;
+
+  const occluders = [];
+  const seen = new Set();
+  for (const hit of world.cameraRaycaster.intersectObjects(world.cameraOcclusionMeshes, false)) {
+    if (hit.distance <= 0.2 || seen.has(hit.object)) {
+      continue;
+    }
+    seen.add(hit.object);
+    occluders.push(hit.object);
+  }
+
+  return occluders;
+}
+
 function createCamera() {
-  const camera = new THREE.PerspectiveCamera(CONFIG.cameraFov, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.copy(CONFIG.cameraOffset);
-  camera.lookAt(0, CONFIG.cameraTargetHeight, 0);
+  const camera = new THREE.PerspectiveCamera(CONFIG.cameraFov, window.innerWidth / window.innerHeight, 0.1, 180);
+  const activeCamera = getActiveCameraSettings();
+  camera.position.copy(getActiveCameraOffset());
+  camera.lookAt(0, activeCamera.targetHeight, 0);
   return camera;
 }
 
@@ -450,7 +670,7 @@ function createControls(camera, domElement) {
   controls.minDistance = 4;
   controls.maxDistance = 16;
   controls.maxPolarAngle = Math.PI * 0.475;
-  controls.target.set(0, CONFIG.cameraTargetHeight, 0);
+  controls.target.set(0, getActiveCameraSettings().targetHeight, 0);
   return controls;
 }
 
@@ -643,6 +863,9 @@ function bindKeyboard() {
         break;
       case "Digit8":
         toggleDebugFlag("orbit");
+        break;
+      case "Digit9":
+        toggleDebugFlag("route");
         break;
       default:
         break;
@@ -952,6 +1175,338 @@ function normalizeScaleConfig(value, label) {
     }
   }
   return normalized;
+}
+
+function normalizeTransformConfig(value, label) {
+  const rotationDeg = normalizeVectorConfig(
+    value?.rotationDeg,
+    `${label}.rotationDeg`,
+    { x: 0, y: 0, z: 0 },
+  );
+
+  return {
+    position: normalizeVectorConfig(
+      value?.position,
+      `${label}.position`,
+      { x: 0, y: 0, z: 0 },
+    ),
+    rotation: {
+      x: THREE.MathUtils.degToRad(rotationDeg.x),
+      y: THREE.MathUtils.degToRad(rotationDeg.y),
+      z: THREE.MathUtils.degToRad(rotationDeg.z),
+    },
+    scale: normalizeScaleConfig(
+      value?.scale,
+      `${label}.scale`,
+    ),
+  };
+}
+
+function normalizeColorConfig(value, label, fallback) {
+  try {
+    return new THREE.Color(value ?? fallback).getHex();
+  } catch {
+    throw new Error(`${label} must be a valid color`);
+  }
+}
+
+function normalizeStringArray(value, label) {
+  if (value == null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new Error(`${label}[${index}] must be a non-empty string`);
+    }
+    return entry.trim();
+  });
+}
+
+function normalizeStageBounds(bounds, label) {
+  if (bounds == null || typeof bounds !== "object" || Array.isArray(bounds)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  const normalized = {
+    minX: normalizeFiniteNumber(bounds.minX, `${label}.minX`),
+    maxX: normalizeFiniteNumber(bounds.maxX, `${label}.maxX`),
+    minZ: normalizeFiniteNumber(bounds.minZ, `${label}.minZ`),
+    maxZ: normalizeFiniteNumber(bounds.maxZ, `${label}.maxZ`),
+  };
+
+  if (normalized.minX >= normalized.maxX || normalized.minZ >= normalized.maxZ) {
+    throw new Error(`${label} must describe a valid XZ range`);
+  }
+
+  return normalized;
+}
+
+function normalizeStageGrounding(grounding, label) {
+  if (grounding == null || typeof grounding !== "object" || Array.isArray(grounding)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  const normalized = {
+    raycastHeight: normalizeFiniteNumber(grounding.raycastHeight ?? 24, `${label}.raycastHeight`),
+    maxStepUp: normalizeFiniteNumber(grounding.maxStepUp ?? 1.5, `${label}.maxStepUp`),
+    maxStepDown: normalizeFiniteNumber(grounding.maxStepDown ?? 3, `${label}.maxStepDown`),
+    minNormalY: normalizeFiniteNumber(grounding.minNormalY ?? 0.45, `${label}.minNormalY`),
+    aimHeightOffset: normalizeFiniteNumber(grounding.aimHeightOffset ?? 0.02, `${label}.aimHeightOffset`),
+    walkableMeshNames: normalizeStringArray(grounding.walkableMeshNames, `${label}.walkableMeshNames`),
+    walkableMeshPrefixes: normalizeStringArray(grounding.walkableMeshPrefixes, `${label}.walkableMeshPrefixes`),
+  };
+
+  if (normalized.raycastHeight <= 0) {
+    throw new Error(`${label}.raycastHeight must be greater than 0`);
+  }
+  if (normalized.maxStepUp < 0 || normalized.maxStepDown < 0) {
+    throw new Error(`${label}.maxStepUp and maxStepDown must be greater than or equal to 0`);
+  }
+  if (normalized.minNormalY < -1 || normalized.minNormalY > 1) {
+    throw new Error(`${label}.minNormalY must be between -1 and 1`);
+  }
+
+  return normalized;
+}
+
+function normalizeStageOcclusion(occlusion, label) {
+  if (occlusion == null) {
+    return {
+      enabled: true,
+      collisionBuffer: 0.75,
+      minDistance: 6,
+      probeRadius: 0.7,
+      fadeOpacity: 0.16,
+      fadeLerp: 12,
+    };
+  }
+
+  if (typeof occlusion !== "object" || Array.isArray(occlusion)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  const normalized = {
+    enabled: occlusion.enabled !== false,
+    collisionBuffer: normalizeFiniteNumber(occlusion.collisionBuffer ?? 0.75, `${label}.collisionBuffer`),
+    minDistance: normalizeFiniteNumber(occlusion.minDistance ?? 6, `${label}.minDistance`),
+    probeRadius: normalizeFiniteNumber(occlusion.probeRadius ?? 0.7, `${label}.probeRadius`),
+    fadeOpacity: normalizeFiniteNumber(occlusion.fadeOpacity ?? 0.16, `${label}.fadeOpacity`),
+    fadeLerp: normalizeFiniteNumber(occlusion.fadeLerp ?? 12, `${label}.fadeLerp`),
+  };
+
+  if (normalized.collisionBuffer < 0 || normalized.minDistance <= 0 || normalized.probeRadius < 0) {
+    throw new Error(`${label} numeric values must be positive`);
+  }
+  if (normalized.fadeOpacity <= 0 || normalized.fadeOpacity >= 1) {
+    throw new Error(`${label}.fadeOpacity must be between 0 and 1`);
+  }
+  if (normalized.fadeLerp <= 0) {
+    throw new Error(`${label}.fadeLerp must be greater than 0`);
+  }
+
+  return normalized;
+}
+
+function normalizeStageFog(fog, label) {
+  if (fog == null) {
+    return {
+      color: normalizeColorConfig("#08111b", `${label}.color`, "#08111b"),
+      near: 18,
+      far: 40,
+    };
+  }
+
+  if (typeof fog !== "object" || Array.isArray(fog)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  const near = normalizeFiniteNumber(fog.near ?? 18, `${label}.near`);
+  const far = normalizeFiniteNumber(fog.far ?? 40, `${label}.far`);
+  if (near < 0 || far <= near) {
+    throw new Error(`${label} must have near >= 0 and far > near`);
+  }
+
+  return {
+    color: normalizeColorConfig(fog.color, `${label}.color`, "#08111b"),
+    near,
+    far,
+  };
+}
+
+function normalizeStageLighting(lighting, label) {
+  if (lighting == null) {
+    return {
+      hemiSkyColor: normalizeColorConfig("#d8ebff", `${label}.hemiSkyColor`, "#d8ebff"),
+      hemiGroundColor: normalizeColorConfig("#10161f", `${label}.hemiGroundColor`, "#10161f"),
+      hemiIntensity: 1.15,
+      keyColor: normalizeColorConfig("#ffefd7", `${label}.keyColor`, "#ffefd7"),
+      keyIntensity: 2.2,
+      keyPosition: { x: 8, y: 14, z: 7 },
+      keyShadowBounds: 22,
+      keyShadowFar: 52,
+      fillColor: normalizeColorConfig("#6fdcff", `${label}.fillColor`, "#6fdcff"),
+      fillIntensity: 0.7,
+      fillPosition: { x: -9, y: 6, z: -5 },
+    };
+  }
+
+  if (typeof lighting !== "object" || Array.isArray(lighting)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  return {
+    hemiSkyColor: normalizeColorConfig(lighting.hemiSkyColor, `${label}.hemiSkyColor`, "#d8ebff"),
+    hemiGroundColor: normalizeColorConfig(lighting.hemiGroundColor, `${label}.hemiGroundColor`, "#10161f"),
+    hemiIntensity: normalizeFiniteNumber(lighting.hemiIntensity ?? 1.15, `${label}.hemiIntensity`),
+    keyColor: normalizeColorConfig(lighting.keyColor, `${label}.keyColor`, "#ffefd7"),
+    keyIntensity: normalizeFiniteNumber(lighting.keyIntensity ?? 2.2, `${label}.keyIntensity`),
+    keyPosition: normalizeVectorConfig(lighting.keyPosition, `${label}.keyPosition`, { x: 8, y: 14, z: 7 }),
+    keyShadowBounds: normalizeFiniteNumber(lighting.keyShadowBounds ?? 22, `${label}.keyShadowBounds`),
+    keyShadowFar: normalizeFiniteNumber(lighting.keyShadowFar ?? 52, `${label}.keyShadowFar`),
+    fillColor: normalizeColorConfig(lighting.fillColor, `${label}.fillColor`, "#6fdcff"),
+    fillIntensity: normalizeFiniteNumber(lighting.fillIntensity ?? 0.7, `${label}.fillIntensity`),
+    fillPosition: normalizeVectorConfig(lighting.fillPosition, `${label}.fillPosition`, { x: -9, y: 6, z: -5 }),
+  };
+}
+
+function normalizeStageCamera(camera, label) {
+  if (camera == null) {
+    return null;
+  }
+
+  if (typeof camera !== "object" || Array.isArray(camera)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  const normalized = {
+    yawDeg: normalizeFiniteNumber(camera.yawDeg ?? CONFIG.cameraYawDeg, `${label}.yawDeg`),
+    pitchDeg: normalizeFiniteNumber(camera.pitchDeg ?? CONFIG.cameraPitchDeg, `${label}.pitchDeg`),
+    distance: normalizeFiniteNumber(camera.distance ?? CONFIG.cameraDistance, `${label}.distance`),
+    targetHeight: normalizeFiniteNumber(
+      camera.targetHeight ?? CONFIG.cameraTargetHeight,
+      `${label}.targetHeight`,
+    ),
+  };
+
+  if (normalized.distance <= 0) {
+    throw new Error(`${label}.distance must be greater than 0`);
+  }
+
+  return normalized;
+}
+
+function normalizeStageRoute(route, label) {
+  if (route == null) {
+    return {
+      enabled: true,
+      color: normalizeColorConfig("#46f4ff", `${label}.color`, "#46f4ff"),
+      edgeColor: normalizeColorConfig("#ff58d6", `${label}.edgeColor`, "#ff58d6"),
+      overlayOpacity: 0.2,
+      debugOpacity: 0.9,
+      lift: 0.04,
+    };
+  }
+
+  if (typeof route !== "object" || Array.isArray(route)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  const normalized = {
+    enabled: route.enabled !== false,
+    color: normalizeColorConfig(route.color, `${label}.color`, "#46f4ff"),
+    edgeColor: normalizeColorConfig(route.edgeColor, `${label}.edgeColor`, "#ff58d6"),
+    overlayOpacity: normalizeFiniteNumber(route.overlayOpacity ?? 0.2, `${label}.overlayOpacity`),
+    debugOpacity: normalizeFiniteNumber(route.debugOpacity ?? 0.9, `${label}.debugOpacity`),
+    lift: normalizeFiniteNumber(route.lift ?? 0.04, `${label}.lift`),
+  };
+
+  if (
+    normalized.overlayOpacity <= 0 ||
+    normalized.overlayOpacity >= 1 ||
+    normalized.debugOpacity <= 0 ||
+    normalized.debugOpacity > 1
+  ) {
+    throw new Error(`${label} opacities must be between 0 and 1`);
+  }
+
+  return normalized;
+}
+
+function normalizeStageDefinition(stage, index) {
+  if (!stage?.id) {
+    throw new Error(`Stage entry at index ${index} is missing an id`);
+  }
+  if (!stage.path) {
+    throw new Error(`Stage '${stage.id}' is missing a path`);
+  }
+
+  const spawnYawDeg = normalizeFiniteNumber(stage.spawn?.yawDeg ?? 0, `Stage '${stage.id}' spawn.yawDeg`);
+
+  return {
+    ...stage,
+    path: stage.path,
+    transform: normalizeTransformConfig(stage.transform, `Stage '${stage.id}' transform`),
+    spawn: {
+      position: normalizeVectorConfig(
+        stage.spawn?.position,
+        `Stage '${stage.id}' spawn.position`,
+        { x: 0, y: 0, z: 0 },
+      ),
+      yaw: THREE.MathUtils.degToRad(spawnYawDeg),
+    },
+    grounding: normalizeStageGrounding(stage.grounding, `Stage '${stage.id}' grounding`),
+    bounds: normalizeStageBounds(stage.bounds, `Stage '${stage.id}' bounds`),
+    fog: normalizeStageFog(stage.fog, `Stage '${stage.id}' fog`),
+    lighting: normalizeStageLighting(stage.lighting, `Stage '${stage.id}' lighting`),
+    camera: normalizeStageCamera(stage.camera, `Stage '${stage.id}' camera`),
+    occlusion: normalizeStageOcclusion(stage.occlusion, `Stage '${stage.id}' occlusion`),
+    route: normalizeStageRoute(stage.route, `Stage '${stage.id}' route`),
+  };
+}
+
+function normalizeStageCatalog(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Stage catalog must be an object");
+  }
+
+  if (!Array.isArray(data.stages) || data.stages.length === 0) {
+    throw new Error("Stage catalog must contain at least one stage");
+  }
+
+  const stages = data.stages.map((stage, index) => normalizeStageDefinition(stage, index));
+  const defaultStageId = typeof data.defaultStageId === "string" && data.defaultStageId.trim() !== ""
+    ? data.defaultStageId
+    : stages[0].id;
+  const defaultStage = stages.find((stage) => stage.id === defaultStageId);
+
+  if (!defaultStage) {
+    throw new Error(`Stage catalog defaultStageId '${defaultStageId}' was not found`);
+  }
+
+  return {
+    version: data.version ?? 1,
+    defaultStageId,
+    stages,
+    defaultStage,
+  };
+}
+
+function getMeshBaseName(name) {
+  return name.match(/^(mesh_\d+)/)?.[1] ?? name;
+}
+
+function matchesMeshSelector(name, names = [], prefixes = []) {
+  if (names.includes(name)) {
+    return true;
+  }
+
+  const baseName = getMeshBaseName(name);
+  return prefixes.some((prefix) => prefix === name || prefix === baseName || name.startsWith(`${prefix}_`));
 }
 
 function normalizeSocketDefinition(key, socket) {
@@ -1287,6 +1842,19 @@ async function loadAssetContract() {
     asset: normalizeAssetContract(asset),
     uiPacks: normalizeUiPacks(data.uiPacks),
   };
+}
+
+async function loadStageCatalog() {
+  const response = await fetch("/assets/Map/index.json");
+  if (!response.ok) {
+    if (response.status === 404) {
+      return null;
+    }
+    throw new Error("Could not load /assets/Map/index.json");
+  }
+
+  const data = await response.json();
+  return normalizeStageCatalog(data);
 }
 
 async function loadHero(scene, asset) {
@@ -1866,29 +2434,276 @@ function createPropAttachment(model, key, attachment, sourceScene) {
   };
 }
 
-function createGymLevel(scene, renderer) {
-  const stage = new THREE.Group();
-  stage.name = "MinimalStage";
-  scene.add(stage);
-
-  const hemi = new THREE.HemisphereLight(0xd8ebff, 0x10161f, 1.15);
+function createWorldLighting(scene, lighting) {
+  const hemi = new THREE.HemisphereLight(
+    lighting.hemiSkyColor,
+    lighting.hemiGroundColor,
+    lighting.hemiIntensity,
+  );
   scene.add(hemi);
 
-  const key = new THREE.DirectionalLight(0xffefd7, 2.2);
-  key.position.set(8, 14, 7);
+  const key = new THREE.DirectionalLight(lighting.keyColor, lighting.keyIntensity);
+  key.position.set(lighting.keyPosition.x, lighting.keyPosition.y, lighting.keyPosition.z);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -22;
-  key.shadow.camera.right = 22;
-  key.shadow.camera.top = 22;
-  key.shadow.camera.bottom = -22;
+  key.shadow.camera.left = -lighting.keyShadowBounds;
+  key.shadow.camera.right = lighting.keyShadowBounds;
+  key.shadow.camera.top = lighting.keyShadowBounds;
+  key.shadow.camera.bottom = -lighting.keyShadowBounds;
   key.shadow.camera.near = 1;
-  key.shadow.camera.far = 52;
+  key.shadow.camera.far = lighting.keyShadowFar;
   scene.add(key);
 
-  const fill = new THREE.DirectionalLight(0x6fdcff, 0.7);
-  fill.position.set(-9, 6, -5);
+  const fill = new THREE.DirectionalLight(lighting.fillColor, lighting.fillIntensity);
+  fill.position.set(lighting.fillPosition.x, lighting.fillPosition.y, lighting.fillPosition.z);
   scene.add(fill);
+
+  return { hemi, key, fill };
+}
+
+function applyStageSceneTuning(scene, camera, stageData) {
+  if (!stageData) {
+    return;
+  }
+
+  scene.background = new THREE.Color(stageData.fog.color);
+  scene.fog = new THREE.Fog(stageData.fog.color, stageData.fog.near, stageData.fog.far);
+
+  const spanX = stageData.bounds.maxX - stageData.bounds.minX;
+  const spanZ = stageData.bounds.maxZ - stageData.bounds.minZ;
+  camera.far = Math.max(camera.far, Math.max(spanX, spanZ) * 6);
+  camera.updateProjectionMatrix();
+}
+
+function prepareStageModel(root) {
+  root.traverse((child) => {
+    if (!child.isMesh) {
+      return;
+    }
+    child.castShadow = true;
+    child.receiveShadow = true;
+  });
+}
+
+function resolveMeshSelection(root, { names = [], prefixes = [] }, { fallbackToAll = false } = {}) {
+  const matches = [];
+  const useFilters = names.length > 0 || prefixes.length > 0;
+
+  root.traverse((child) => {
+    if (!child.isMesh) {
+      return;
+    }
+
+    if (useFilters) {
+      if (matchesMeshSelector(child.name, names, prefixes)) {
+        matches.push(child);
+      }
+      return;
+    }
+
+    if (fallbackToAll) {
+      matches.push(child);
+    }
+  });
+
+  return matches;
+}
+
+function resolveWalkableMeshes(root, stageData) {
+  return resolveMeshSelection(
+    root,
+    {
+      names: stageData.grounding.walkableMeshNames,
+      prefixes: stageData.grounding.walkableMeshPrefixes,
+    },
+    { fallbackToAll: true },
+  );
+}
+
+function resolveCameraOcclusionMeshes(root) {
+  const meshes = [];
+  root.traverse((child) => {
+    if (!child.isMesh) {
+      return;
+    }
+
+    tempCameraBounds.setFromObject(child);
+    const size = tempCameraBounds.getSize(tempVector);
+    const footprint = size.x * size.z;
+    if (size.y < 0.18 && footprint < 0.04) {
+      return;
+    }
+
+    meshes.push(child);
+  });
+  return meshes;
+}
+
+function createRouteVisuals(walkableMeshes, routeConfig) {
+  const overlay = new THREE.Group();
+  overlay.name = "RouteOverlay";
+  overlay.visible = routeConfig.enabled;
+
+  const debugGroup = new THREE.Group();
+  debugGroup.name = "RouteDebug";
+  debugGroup.visible = false;
+
+  const fillMaterial = new THREE.MeshBasicMaterial({
+    color: routeConfig.color,
+    transparent: true,
+    opacity: routeConfig.overlayOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: routeConfig.edgeColor,
+    transparent: true,
+    opacity: routeConfig.debugOpacity,
+    depthWrite: false,
+  });
+
+  for (const mesh of walkableMeshes) {
+    const fill = new THREE.Mesh(mesh.geometry, fillMaterial);
+    fill.matrixAutoUpdate = false;
+    tempCameraMatrix.copy(mesh.matrixWorld);
+    tempCameraMatrix.elements[13] += routeConfig.lift;
+    fill.matrix.copy(tempCameraMatrix);
+    fill.frustumCulled = false;
+    fill.renderOrder = 2;
+    overlay.add(fill);
+
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 26), edgeMaterial);
+    edges.matrixAutoUpdate = false;
+    edges.matrix.copy(tempCameraMatrix);
+    edges.frustumCulled = false;
+    edges.renderOrder = 3;
+    debugGroup.add(edges);
+  }
+
+  return { overlay, debugGroup };
+}
+
+async function loadStageEnvironment(parent, stageData) {
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync(stageData.path);
+
+  const root = gltf.scene;
+  root.name = `${stageData.id}Root`;
+  prepareStageModel(root);
+
+  const wrapper = new THREE.Group();
+  wrapper.name = `${stageData.id}Wrapper`;
+  applyTransformToObject3D(wrapper, stageData.transform);
+  wrapper.add(root);
+  parent.add(wrapper);
+  wrapper.updateMatrixWorld(true);
+
+  return {
+    root,
+    wrapper,
+    bounds: computeVisibleMeshBounds(wrapper),
+    walkableMeshes: resolveWalkableMeshes(wrapper, stageData),
+    cameraOcclusionMeshes: resolveCameraOcclusionMeshes(wrapper),
+  };
+}
+
+function createSpawnMarker() {
+  const marker = createOriginMarker(0x90ffe4, 0x5ee7a8, 0x7acbff);
+  marker.scale.setScalar(0.8);
+  return marker;
+}
+
+function createGroundHitMarker() {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 16, 16),
+    new THREE.MeshBasicMaterial({
+      color: 0x7df5ff,
+      transparent: true,
+      opacity: 0.9,
+    }),
+  );
+}
+
+function createStageBoundsHelper(bounds, environmentBounds) {
+  return new THREE.Box3Helper(
+    new THREE.Box3(
+      new THREE.Vector3(bounds.minX, environmentBounds.min.y, bounds.minZ),
+      new THREE.Vector3(bounds.maxX, environmentBounds.max.y, bounds.maxZ),
+    ),
+    0x7df5ff,
+  );
+}
+
+async function createGymLevel(scene, renderer, stageData = null) {
+  if (stageData) {
+    applyStageSceneTuning(scene, runtime.camera, stageData);
+  }
+
+  const stage = new THREE.Group();
+  stage.name = stageData ? `${stageData.id}Stage` : "MinimalStage";
+  scene.add(stage);
+
+  const lights = createWorldLighting(scene, stageData?.lighting ?? normalizeStageLighting(null, "defaultLighting"));
+  const helpers = {
+    grid: new THREE.GridHelper(120, 48, 0x4ddfff, 0x26384e),
+    axes: new THREE.AxesHelper(2.5),
+    origin: createOriginMarker(),
+    spawn: createSpawnMarker(),
+    groundHit: createGroundHitMarker(),
+    stageBounds: null,
+    routeOverlay: null,
+    routeDebug: null,
+  };
+
+  helpers.grid.position.y = 0.025;
+  helpers.axes.position.set(-2.5, 0.03, -2.5);
+  helpers.origin.position.y = 0.03;
+  scene.add(helpers.grid, helpers.axes, helpers.origin, helpers.spawn, helpers.groundHit);
+  if (stageData) {
+    const environment = await loadStageEnvironment(stage, stageData);
+    helpers.stageBounds = createStageBoundsHelper(stageData.bounds, environment.bounds);
+    scene.add(helpers.stageBounds);
+    if (stageData.route.enabled) {
+      const routeVisuals = createRouteVisuals(environment.walkableMeshes, stageData.route);
+      helpers.routeOverlay = routeVisuals.overlay;
+      helpers.routeDebug = routeVisuals.debugGroup;
+      stage.add(routeVisuals.overlay, routeVisuals.debugGroup);
+    }
+    const spawnPosition = getStageSpawnPositionFromWorld({
+      stageData,
+      walkableMeshes: environment.walkableMeshes,
+      raycastTopY: environment.bounds.max.y + stageData.grounding.raycastHeight,
+      lastGroundSample: null,
+    });
+    helpers.spawn.position.copy(spawnPosition);
+    helpers.groundHit.visible = false;
+
+    return {
+      stage,
+      floor: null,
+      startPad: null,
+      lights,
+      helpers,
+      environment,
+      stageData,
+      walkableMeshes: environment.walkableMeshes,
+      cameraOcclusionMeshes: environment.cameraOcclusionMeshes,
+      raycastTopY: environment.bounds.max.y + stageData.grounding.raycastHeight,
+      lastGroundSample: null,
+      cameraRaycaster: new THREE.Raycaster(),
+      activeCameraOccluders: new Map(),
+      forcedCameraOccluders: [],
+      cameraTelemetry: {
+        desiredDistance: 0,
+        clampedDistance: 0,
+        activeOccluders: [],
+      },
+    };
+  }
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(4000, 4000),
@@ -1930,27 +2745,39 @@ function createGymLevel(scene, renderer) {
   startPadTop.position.y = 0.002;
   stage.add(startPadTop);
 
-  const helpers = {
-    grid: new THREE.GridHelper(120, 48, 0x4ddfff, 0x26384e),
-    axes: new THREE.AxesHelper(2.5),
-    origin: createOriginMarker(),
+  helpers.spawn.position.set(0, 0.03, 0);
+  helpers.groundHit.visible = false;
+
+  return {
+    stage,
+    floor,
+    startPad,
+    lights,
+    helpers,
+    environment: null,
+    stageData: null,
+    walkableMeshes: [],
+    cameraOcclusionMeshes: [],
+    raycastTopY: CONFIG.ringY + 10,
+    lastGroundSample: null,
+    cameraRaycaster: new THREE.Raycaster(),
+    activeCameraOccluders: new Map(),
+    forcedCameraOccluders: [],
+    cameraTelemetry: {
+      desiredDistance: 0,
+      clampedDistance: 0,
+      activeOccluders: [],
+    },
   };
-
-  helpers.grid.position.y = 0.025;
-  helpers.axes.position.set(-2.5, 0.03, -2.5);
-  helpers.origin.position.y = 0.03;
-  scene.add(helpers.grid, helpers.axes, helpers.origin);
-
-  return { stage, floor, helpers };
 }
 
-function createOriginMarker() {
+function createOriginMarker(ringColor = 0xffffff, xColor = 0x61ddff, zColor = 0xff9a72) {
   const group = new THREE.Group();
 
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.82, 0.98, 48),
     new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: ringColor,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.4,
@@ -1964,7 +2791,7 @@ function createOriginMarker() {
       new THREE.Vector3(-1.35, 0, 0),
       new THREE.Vector3(1.35, 0, 0),
     ]),
-    new THREE.LineBasicMaterial({ color: 0x61ddff }),
+    new THREE.LineBasicMaterial({ color: xColor }),
   );
   group.add(xLine);
 
@@ -1973,7 +2800,7 @@ function createOriginMarker() {
       new THREE.Vector3(0, 0, -1.35),
       new THREE.Vector3(0, 0, 1.35),
     ]),
-    new THREE.LineBasicMaterial({ color: 0xff9a72 }),
+    new THREE.LineBasicMaterial({ color: zColor }),
   );
   group.add(zLine);
 
@@ -2491,6 +3318,149 @@ function createPosterTexture(title, subtitle, accentColor) {
   return texture;
 }
 
+function isWithinStageBounds(x, z, world = runtime.world) {
+  const bounds = world?.stageData?.bounds;
+  if (!bounds) {
+    return true;
+  }
+
+  return (
+    x >= bounds.minX &&
+    x <= bounds.maxX &&
+    z >= bounds.minZ &&
+    z <= bounds.maxZ
+  );
+}
+
+function getGroundSampleAt(x, z, world = runtime.world) {
+  if (!world?.stageData) {
+    return {
+      point: new THREE.Vector3(x, CONFIG.ringY, z),
+      normal: UP.clone(),
+      objectName: world?.floor?.name ?? null,
+    };
+  }
+
+  if (!isWithinStageBounds(x, z, world) || world.walkableMeshes.length === 0) {
+    return null;
+  }
+
+  if (!world.raycaster) {
+    world.raycaster = new THREE.Raycaster();
+  }
+
+  tempGroundRayOrigin.set(x, world.raycastTopY, z);
+  world.raycaster.set(tempGroundRayOrigin, new THREE.Vector3(0, -1, 0));
+  const hits = world.raycaster.intersectObjects(world.walkableMeshes, false);
+
+  for (const hit of hits) {
+    if (!hit.face) {
+      continue;
+    }
+
+    tempGroundNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
+    if (tempGroundNormal.y < world.stageData.grounding.minNormalY) {
+      continue;
+    }
+
+    return {
+      point: hit.point.clone(),
+      normal: tempGroundNormal.clone(),
+      objectName: hit.object.name,
+    };
+  }
+
+  return null;
+}
+
+function setLastGroundSample(sample, world = runtime.world) {
+  if (!world) {
+    return;
+  }
+
+  world.lastGroundSample = sample
+    ? {
+        point: sample.point.clone(),
+        normal: sample.normal.clone(),
+        objectName: sample.objectName ?? null,
+      }
+    : null;
+}
+
+function getStageSpawnPositionFromWorld(world = runtime.world) {
+  tempSpawnPosition.set(
+    world?.stageData?.spawn.position.x ?? 0,
+    world?.stageData?.spawn.position.y ?? CONFIG.ringY,
+    world?.stageData?.spawn.position.z ?? 0,
+  );
+
+  const sample = getGroundSampleAt(tempSpawnPosition.x, tempSpawnPosition.z, world);
+  if (sample) {
+    tempSpawnPosition.copy(sample.point);
+  }
+
+  return tempSpawnPosition;
+}
+
+function setHeroGroundPosition(hero, x, z, { force = false, track = false } = {}) {
+  const sample = getGroundSampleAt(x, z);
+  if (!sample) {
+    if (track) {
+      setLastGroundSample(null);
+    }
+    return false;
+  }
+
+  if (!force && runtime.world?.stageData) {
+    const deltaY = sample.point.y - hero.root.position.y;
+    if (
+      deltaY > runtime.world.stageData.grounding.maxStepUp ||
+      deltaY < -runtime.world.stageData.grounding.maxStepDown
+    ) {
+      if (track) {
+        setLastGroundSample(getGroundSampleAt(hero.root.position.x, hero.root.position.z));
+      }
+      return false;
+    }
+  }
+
+  hero.root.position.set(x, sample.point.y, z);
+  if (track) {
+    setLastGroundSample(sample);
+  }
+  return true;
+}
+
+function resetAimPointFromHero(hero) {
+  if (!hero) {
+    return;
+  }
+
+  tempVector.set(Math.sin(hero.root.rotation.y), 0, Math.cos(hero.root.rotation.y));
+  if (tempVector.lengthSq() < 0.0001) {
+    tempVector.set(0, 0, 1);
+  } else {
+    tempVector.normalize();
+  }
+
+  runtime.aimPoint.copy(hero.root.position).addScaledVector(tempVector, 4);
+  runtime.aimPoint.y = hero.root.position.y + (runtime.world?.stageData?.grounding.aimHeightOffset ?? 0.02);
+}
+
+function placeHeroAtStageSpawn(hero) {
+  const spawnPosition = getStageSpawnPositionFromWorld();
+  const spawnYaw = runtime.world?.stageData?.spawn.yaw ?? 0;
+
+  hero.root.position.copy(spawnPosition);
+  hero.root.rotation.set(0, spawnYaw, 0);
+  hero.lastMoveDirection.set(Math.sin(spawnYaw), 0, Math.cos(spawnYaw));
+  hero.rollDirection.copy(hero.lastMoveDirection);
+  setLastGroundSample(getGroundSampleAt(spawnPosition.x, spawnPosition.z));
+  runtime.world.helpers.spawn.position.copy(spawnPosition);
+  runtime.world.helpers.spawn.position.y += 0.03;
+  resetAimPointFromHero(hero);
+}
+
 function updateFrame() {
   const dt = Math.min(runtime.clock.getDelta(), CONFIG.maxDelta);
   if (!runtime.hero) {
@@ -2514,14 +3484,21 @@ function updateHero(dt) {
   const hero = runtime.hero;
   const desiredMove = getCameraRelativeMove();
   hero.moveDirection.copy(desiredMove);
+  const currentX = hero.root.position.x;
+  const currentZ = hero.root.position.z;
 
   const isEvading = Boolean(hero.actionLock);
   const canMoveOnGround = !isEvading;
   const moveStrength = desiredMove.lengthSq();
 
   if (isEvading && hero.rollTimeLeft > 0) {
-    hero.root.position.addScaledVector(hero.rollDirection, CONFIG.rollSpeed * dt);
-    hero.lastMoveDirection.copy(hero.rollDirection);
+    const nextX = hero.root.position.x + hero.rollDirection.x * CONFIG.rollSpeed * dt;
+    const nextZ = hero.root.position.z + hero.rollDirection.z * CONFIG.rollSpeed * dt;
+    if (setHeroGroundPosition(hero, nextX, nextZ, { track: true })) {
+      hero.lastMoveDirection.copy(hero.rollDirection);
+    } else {
+      setHeroGroundPosition(hero, currentX, currentZ, { force: true, track: true });
+    }
     hero.rollTimeLeft = Math.max(0, hero.rollTimeLeft - dt);
     if (hero.rollTimeLeft === 0) {
       if (hero.evadeRecoveryTimeLeft === 0) {
@@ -2534,7 +3511,6 @@ function updateHero(dt) {
       finishRoll(hero);
     }
   } else if (moveStrength > 0) {
-    hero.lastMoveDirection.copy(desiredMove);
     const speed = runtime.input.pistolStance
       ? CONFIG.pistolMoveSpeed
       : runtime.input.crouchModifier
@@ -2543,8 +3519,16 @@ function updateHero(dt) {
           ? CONFIG.sprintSpeed
           : CONFIG.runSpeed;
     if (canMoveOnGround) {
-      hero.root.position.addScaledVector(desiredMove, speed * dt);
+      const nextX = hero.root.position.x + desiredMove.x * speed * dt;
+      const nextZ = hero.root.position.z + desiredMove.z * speed * dt;
+      if (setHeroGroundPosition(hero, nextX, nextZ, { track: true })) {
+        hero.lastMoveDirection.copy(desiredMove);
+      } else {
+        setHeroGroundPosition(hero, currentX, currentZ, { force: true, track: true });
+      }
     }
+  } else {
+    setHeroGroundPosition(hero, hero.root.position.x, hero.root.position.z, { force: true, track: true });
   }
 
   if (hero.upperBodyActionLock && hero.upperBodyRecoveryTimeLeft > 0) {
@@ -2564,8 +3548,9 @@ function updateAimTarget(dt) {
     return;
   }
 
+  const camera = getActiveCameraSettings();
   tempScreenPoint.copy(runtime.hero.root.position);
-  tempScreenPoint.y += CONFIG.cameraTargetHeight;
+  tempScreenPoint.y += camera.targetHeight;
   tempScreenPoint.project(runtime.camera);
 
   const heroScreenX = (tempScreenPoint.x * 0.5 + 0.5) * window.innerWidth;
@@ -2593,7 +3578,7 @@ function updateAimTarget(dt) {
   tempVector.normalize();
   const aimDistance = THREE.MathUtils.clamp(1.4 + screenDistance * 0.015, 1.4, 8);
   runtime.aimPoint.copy(runtime.hero.root.position).addScaledVector(tempVector, aimDistance);
-  runtime.aimPoint.y = CONFIG.ringY + 0.02;
+  runtime.aimPoint.y = runtime.hero.root.position.y + (runtime.world?.stageData?.grounding.aimHeightOffset ?? 0.02);
 
   let targetYaw = Math.atan2(tempVector.x, tempVector.z);
   const pistolYawTarget = getWeaponDrivenTargetYaw(runtime.hero, runtime.hero.attachments?.pistol, runtime.aimPoint);
@@ -2704,20 +3689,32 @@ function updateStageTracking() {
 
 function updateCamera(dt) {
   const hero = runtime.hero;
+  const camera = getActiveCameraSettings();
   runtime.cameraTarget.copy(hero.root.position);
-  runtime.cameraTarget.y += CONFIG.cameraTargetHeight;
+  runtime.cameraTarget.y += camera.targetHeight;
 
   if (runtime.debug.orbit) {
     runtime.controls.enabled = true;
     runtime.controls.target.lerp(runtime.cameraTarget, 1 - Math.exp(-dt * CONFIG.cameraLerp));
     runtime.controls.update();
+    runtime.world.cameraTelemetry.activeOccluders = [];
+    updateOccluderFadeState(dt, []);
     return;
   }
 
   runtime.controls.enabled = false;
   runtime.cameraLookTarget.lerp(runtime.cameraTarget, 1 - Math.exp(-dt * CONFIG.cameraLerp));
-  tempCameraPosition.copy(runtime.cameraTarget).add(CONFIG.cameraOffset);
-  runtime.camera.position.lerp(tempCameraPosition, 1 - Math.exp(-dt * CONFIG.cameraLerp));
+  tempCameraDesiredPosition.copy(runtime.cameraTarget).add(getActiveCameraOffset());
+  getClampedCameraPosition(runtime.cameraTarget, tempCameraDesiredPosition);
+  runtime.camera.position.lerp(tempCameraDesiredPosition, 1 - Math.exp(-dt * CONFIG.cameraLerp));
+  const occluders = collectCameraOccluders(runtime.cameraLookTarget, runtime.camera.position);
+  for (const mesh of runtime.world.forcedCameraOccluders) {
+    if (!occluders.includes(mesh)) {
+      occluders.push(mesh);
+    }
+  }
+  runtime.world.cameraTelemetry.activeOccluders = occluders.map((mesh) => mesh.name);
+  updateOccluderFadeState(dt, occluders);
   runtime.camera.lookAt(runtime.cameraLookTarget);
 }
 
@@ -2726,6 +3723,17 @@ function updateDebugHelpers() {
   worldHelpers.grid.visible = runtime.debug.grid;
   worldHelpers.axes.visible = runtime.debug.axes;
   worldHelpers.origin.visible = runtime.debug.origin;
+  worldHelpers.spawn.visible = runtime.debug.origin;
+  if (worldHelpers.stageBounds) {
+    worldHelpers.stageBounds.visible = runtime.debug.bounds;
+  }
+  if (worldHelpers.routeDebug) {
+    worldHelpers.routeDebug.visible = runtime.debug.route;
+  }
+  worldHelpers.groundHit.visible = runtime.debug.bounds && Boolean(runtime.world.lastGroundSample);
+  if (runtime.world.lastGroundSample) {
+    worldHelpers.groundHit.position.copy(runtime.world.lastGroundSample.point);
+  }
 
   if (!runtime.hero) {
     return;
@@ -3230,16 +4238,13 @@ function resetHeroTransform() {
   }
 
   clearMovementInput();
-  runtime.hero.root.position.set(0, CONFIG.ringY, 0);
-  runtime.hero.root.rotation.set(0, 0, 0);
   runtime.hero.grounded = true;
   runtime.hero.actionLock = null;
   runtime.hero.upperBodyActionLock = null;
   runtime.hero.upperBodyRecoveryTimeLeft = 0;
   runtime.hero.rollTimeLeft = 0;
   runtime.hero.evadeRecoveryTimeLeft = 0;
-  runtime.hero.rollDirection.set(0, 0, 1);
-  runtime.hero.lastMoveDirection.set(0, 0, 1);
+  placeHeroAtStageSpawn(runtime.hero);
   syncGroundedAnimation(runtime.hero, true);
   showToast("Reset position");
 }
@@ -3305,6 +4310,45 @@ function showToast(message, durationMs = 1200) {
   }, durationMs);
 }
 
+function teleportHeroForTest(x, z, yawDeg = null) {
+  if (!runtime.hero) {
+    return false;
+  }
+
+  const success = setHeroGroundPosition(runtime.hero, x, z, { force: true, track: true });
+  if (!success) {
+    return false;
+  }
+
+  if (yawDeg != null) {
+    runtime.hero.root.rotation.y = THREE.MathUtils.degToRad(yawDeg);
+    runtime.hero.lastMoveDirection.set(
+      Math.sin(runtime.hero.root.rotation.y),
+      0,
+      Math.cos(runtime.hero.root.rotation.y),
+    );
+    runtime.hero.rollDirection.copy(runtime.hero.lastMoveDirection);
+  }
+
+  resetAimPointFromHero(runtime.hero);
+  snapCameraToHero(runtime.hero);
+  return true;
+}
+
+function setForcedCameraOccludersForTest(names) {
+  if (!runtime.world) {
+    return [];
+  }
+
+  const requestedNames = Array.isArray(names) ? names : [];
+  runtime.world.forcedCameraOccluders = runtime.world.cameraOcclusionMeshes.filter(
+    (mesh) => requestedNames.includes(mesh.name),
+  );
+  runtime.world.cameraTelemetry.activeOccluders = runtime.world.forcedCameraOccluders.map((mesh) => mesh.name);
+  updateOccluderFadeState(1, runtime.world.forcedCameraOccluders);
+  return runtime.world.forcedCameraOccluders.map((mesh) => mesh.name);
+}
+
 function getTestState() {
   if (!runtime.hero) {
     return {
@@ -3339,6 +4383,9 @@ function getTestState() {
     }
   }
 
+  const desiredCameraDistance = getActiveCameraOffset(tempCameraOffset).length();
+  const currentCameraDistance = runtime.camera.position.distanceTo(runtime.cameraTarget);
+
   return {
     ready: true,
     menusHidden: runtime.ui.menusHidden,
@@ -3350,6 +4397,56 @@ function getTestState() {
       healthPercent: runtime.hud.healthPercent,
       staminaPercent: runtime.hud.staminaPercent,
       activeSlots: runtime.hud.slots.map((slot) => slot.active),
+    },
+    stage: runtime.world?.stageData
+      ? {
+          id: runtime.world.stageData.id,
+          displayName: runtime.world.stageData.displayName ?? null,
+          spawn: {
+            x: runtime.world.stageData.spawn.position.x,
+            y: runtime.world.stageData.spawn.position.y,
+            z: runtime.world.stageData.spawn.position.z,
+            yaw: runtime.world.stageData.spawn.yaw,
+          },
+          bounds: {
+            ...runtime.world.stageData.bounds,
+          },
+        }
+      : null,
+    currentGround: runtime.world?.lastGroundSample
+      ? {
+          x: runtime.world.lastGroundSample.point.x,
+          y: runtime.world.lastGroundSample.point.y,
+          z: runtime.world.lastGroundSample.point.z,
+          normalY: runtime.world.lastGroundSample.normal.y,
+          objectName: runtime.world.lastGroundSample.objectName,
+          baseName: getMeshBaseName(runtime.world.lastGroundSample.objectName ?? ""),
+        }
+      : null,
+    route: runtime.world?.stageData
+      ? {
+          walkableMeshPrefixes: [...runtime.world.stageData.grounding.walkableMeshPrefixes],
+          routeOverlayEnabled: runtime.world.stageData.route.enabled,
+        }
+      : null,
+    camera: {
+      position: {
+        x: runtime.camera.position.x,
+        y: runtime.camera.position.y,
+        z: runtime.camera.position.z,
+      },
+      target: {
+        x: runtime.cameraTarget.x,
+        y: runtime.cameraTarget.y,
+        z: runtime.cameraTarget.z,
+      },
+      distance: currentCameraDistance,
+      desiredDistance: runtime.world.cameraTelemetry?.desiredDistance ?? desiredCameraDistance,
+      clampedDistance: runtime.world.cameraTelemetry?.clampedDistance ?? desiredCameraDistance,
+      clamped:
+        (runtime.world.cameraTelemetry?.clampedDistance ?? desiredCameraDistance) <
+        (runtime.world.cameraTelemetry?.desiredDistance ?? desiredCameraDistance) - 0.05,
+      activeOccluders: [...(runtime.world.cameraTelemetry?.activeOccluders ?? [])].slice(0, 12),
     },
     heroPosition: {
       x: runtime.hero.root.position.x,

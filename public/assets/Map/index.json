@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "defaultStageId": "futuristic_city",
+  "stages": [
+    {
+      "id": "futuristic_city",
+      "displayName": "Futuristic Low Poly City",
+      "path": "/assets/Map/futuristic_low_poly_city.glb",
+      "summary": "Low-poly city map converted from FBX into the runtime GLB path for the gym's first full playable stage experiment.",
+      "transform": {
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "rotationDeg": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 0.004,
+          "y": 0.004,
+          "z": 0.004
+        }
+      },
+      "spawn": {
+        "position": {
+          "x": -18,
+          "y": 0,
+          "z": -2
+        },
+        "yawDeg": 45
+      },
+      "grounding": {
+        "raycastHeight": 110,
+        "maxStepUp": 2.2,
+        "maxStepDown": 4.5,
+        "minNormalY": 0.45,
+        "aimHeightOffset": 0.02,
+        "walkableMeshPrefixes": [
+          "mesh_76",
+          "mesh_21",
+          "mesh_78",
+          "mesh_28",
+          "mesh_11",
+          "mesh_12",
+          "mesh_79",
+          "mesh_53",
+          "mesh_58",
+          "mesh_47"
+        ]
+      },
+      "bounds": {
+        "minX": -61,
+        "maxX": 61,
+        "minZ": -46,
+        "maxZ": 46
+      },
+      "fog": {
+        "color": "#070b16",
+        "near": 72,
+        "far": 220
+      },
+      "lighting": {
+        "hemiSkyColor": "#9bdcff",
+        "hemiGroundColor": "#070b14",
+        "hemiIntensity": 0.68,
+        "keyColor": "#84d6ff",
+        "keyIntensity": 1.18,
+        "keyPosition": {
+          "x": 42,
+          "y": 56,
+          "z": 30
+        },
+        "keyShadowBounds": 96,
+        "keyShadowFar": 190,
+        "fillColor": "#8d67ff",
+        "fillIntensity": 0.44,
+        "fillPosition": {
+          "x": -34,
+          "y": 18,
+          "z": -26
+        }
+      },
+      "camera": {
+        "yawDeg": 0,
+        "pitchDeg": 28,
+        "distance": 16,
+        "targetHeight": 1.55
+      },
+      "occlusion": {
+        "enabled": true,
+        "collisionBuffer": 0.7,
+        "minDistance": 6,
+        "probeRadius": 0.75,
+        "fadeOpacity": 0.14,
+        "fadeLerp": 11
+      },
+      "route": {
+        "enabled": true,
+        "color": "#3ef0ff",
+        "edgeColor": "#ff5fdb",
+        "overlayOpacity": 0.18,
+        "debugOpacity": 0.9,
+        "lift": 0.045
+      }
+    }
+  ]
+}

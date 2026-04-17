@@ -11,8 +11,8 @@ const page = await browser.newPage({
 try {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(() => window.__TEST__?.ready === true);
-  await page.mouse.move(1180, 440);
-  await page.mouse.click(1180, 860);
+  await page.mouse.move(720, 540);
+  await page.mouse.click(720, 540);
   await page.waitForTimeout(220);
 
   async function readUiState() {
@@ -96,7 +96,9 @@ try {
 
   await page.screenshot({ path: "hud-probe-dodge.png" });
 
-  await page.waitForTimeout(2400);
+  await page.waitForFunction(() => window.__TEST__.getState().hud.staminaPercent >= 99.9, {
+    timeout: 5000,
+  });
   const afterRefill = await readUiState();
   assert.equal(afterRefill.hudText.stamina, "100%", "stamina should refill back to full");
   assert.ok(
@@ -131,7 +133,18 @@ try {
   );
 
   await page.keyboard.press("F1");
-  await page.waitForTimeout(220);
+  await page.waitForFunction(() => {
+    const uiShell = document.querySelector("#ui");
+    const crosshair = document.querySelector("#mouse-crosshair");
+    if (!uiShell || !crosshair) {
+      return false;
+    }
+    return (
+      window.__TEST__.getState().menusHidden === true &&
+      getComputedStyle(uiShell).visibility === "hidden" &&
+      getComputedStyle(crosshair).opacity !== "0"
+    );
+  }, { timeout: 2500 });
   const afterF1 = await readUiState();
   if (afterF1.uiShell?.visibility !== "hidden") {
     console.error("afterF1 state:", JSON.stringify(afterF1, null, 2));
@@ -170,6 +183,7 @@ try {
     ["Digit6", "vectors"],
     ["Digit7", "hitboxes"],
     ["Digit8", "orbit"],
+    ["Digit9", "route"],
   ];
 
   const digitChecks = [];

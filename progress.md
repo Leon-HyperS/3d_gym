@@ -66,3 +66,66 @@ Original prompt: inspect the repo and understands how the assets are being lever
 - Follow-up HUD behavior fix: `requestRoll()` now blocks evade startup when stamina is below the dodge cost, shows a `Not enough stamina` toast, and exposes `window.__TEST__.setHudStaminaPercent()` so the Playwright probe can verify the blocked low-stamina case directly.
 - Updated `scripts/hud-probe.mjs` to force stamina below the threshold and confirm `Space` leaves `actionLock` null, `rollTimeLeft` at `0`, and the hero position unchanged while stamina continues refilling normally.
 
+## 2026-04-16
+
+- Integrated the new city environment as a dedicated stage pipeline instead of overloading the fighter asset contract.
+- Added `scripts/convert-city-map.mjs` so `public/assets/Map/futuristic low poly city by niko.fbx` can be reproducibly converted into the runtime GLB `public/assets/Map/futuristic_low_poly_city.glb`.
+- The conversion pass now recenters the city in X/Z, grounds it at `y = 0`, and coerces FBX materials to opaque `MeshStandardMaterial`s after discovering the imported source materials carried `opacity: 0`.
+- Added `public/assets/Map/index.json` as the new stage metadata entry point. The current default stage is `futuristic_city` with:
+  - runtime scale `0.001`
+  - rooftop spawn near `(-4.5, 0, -0.5)` with `yawDeg: 45`
+  - stage bounds `x: [-15.25, 15.25]`, `z: [-11.5, 11.5]`
+  - stage-specific fog and lighting overrides
+- Refactored `src/main.js` so startup now loads the stage catalog before hero creation, then builds `runtime.world` from the stage metadata and stage GLB before spawning the fighter.
+- Added stage-ground queries in `src/main.js` via downward raycasts against the active stage meshes, replacing the old hard-coded `CONFIG.ringY` assumptions for spawn, movement, roll traversal, reset, and aim-plane height.
+- Added city-aware debug/test state:
+  - `window.__TEST__.getState()` now reports `stage` and `currentGround`
+  - the existing bounds toggle now covers both model and stage bounds
+  - the origin toggle now also exposes the stage spawn marker
+- Updated the main UI copy so it no longer describes the experience as a single flat floor.
+- Added `scripts/city-stage-probe.mjs` as a reusable Playwright smoke script for the city stage. It verifies:
+  - city stage boot + grounded spawn
+  - bounds toggle still works
+  - traversal keeps the hero grounded
+  - roll recovers normally on the map
+  - reset returns to the configured city spawn
+  - pistol stance and pistol shoot still work on the city stage
+- Verified the city integration with:
+  - `npm.cmd run build`
+  - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+- The large bundle-size warning from Vite still exists, but the build succeeds.
+- Follow-up city pass after user feedback:
+  - Increased the stage metadata scale from `0.001` to `0.004`, expanded the city bounds accordingly, and moved the spawn to `(-18, 0, -2)` on the same rooftop footprint at the new proportionate scale.
+  - Retuned stage grounding for the larger block (`raycastHeight: 110`, `maxStepUp: 2.2`, `maxStepDown: 4.5`) so traversal still works at the larger world size.
+  - Reworked `scripts/convert-city-map.mjs` to assign deterministic sci-fi colors per mesh from its bounds classification:
+    - dark blue graphite for streets / base slabs
+    - cool blue-violet tones for tall buildings
+    - brighter cyan / magenta accents for circular and cylindrical detail pieces
+  - Added optional stage camera metadata support in `src/main.js` and tuned the city stage camera to `yawDeg: 0`, `pitchDeg: 28`, `distance: 16`, `targetHeight: 1.55` so the enlarged city stays readable around the hero.
+  - Rebuilt the city GLB with the new palette and reran:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+- City camera and road upgrade pass:
+  - Promoted the city roads to an explicit stage contract in `public/assets/Map/index.json` by adding `grounding.walkableMeshPrefixes`, a new `occlusion` tuning block, and a `route` styling block.
+  - Extended `src/main.js` stage normalization to understand walkable mesh prefixes plus the new route and occlusion metadata, and switched walkability over to that explicit filter instead of silently defaulting to all meshes.
+  - Added a persistent legal-road overlay plus a `Digit9` / `data-debug-toggle="route"` debug mode so the playable road network stays readable in normal play and can be inspected more aggressively when needed.
+  - Implemented a hybrid third-person alley camera in `src/main.js`:
+    - cached stage occlusion meshes during stage load
+    - approximate boom collision with a small multi-ray sweep
+    - apply selective blocker fading with lazy per-mesh material cloning
+    - expose camera clamp distance and active blocker names through `window.__TEST__.getState()`
+  - Added narrow `window.__TEST__` helpers to snap the hero to test coordinates and drive deterministic camera-occlusion checks in Playwright without affecting normal controls.
+  - Reworked `scripts/convert-city-map.mjs` to read the stage metadata road prefixes and route colors, then push a brighter cyberpunk-anime pass across roads, window bands, facades, and accent props while keeping the route overlay and road materials in sync.
+  - Expanded `scripts/city-stage-probe.mjs` to verify:
+    - spawn lands on the legal road set
+    - `Digit9` toggles the road debug overlay
+    - off-road placement is rejected
+    - a legal alley checkpoint clamps the camera and fades the remaining blocker
+    - the blocker recovers after returning to spawn
+    - the prior roll/reset/pistol smoke checks still pass
+  - Hardened `scripts/hud-probe.mjs` for the heavier city scene by waiting on actual stamina/menu state instead of fixed sleeps, and extended the shortcut coverage to include `Digit9`.
+  - Verified this pass with:
+    - `node scripts/convert-city-map.mjs "public/assets/Map/futuristic low poly city by niko.fbx" "public/assets/Map/futuristic_low_poly_city.glb"`
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
+    - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`

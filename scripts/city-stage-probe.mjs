@@ -1,0 +1,258 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { chromium } from "playwright";
+
+const url = process.argv[2] ?? "http://127.0.0.1:4173/";
+
+await fs.mkdir("artifacts", { recursive: true });
+
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({
+  viewport: { width: 1440, height: 900 },
+});
+
+async function readState() {
+  return page.evaluate(() => window.__TEST__.getState());
+}
+
+async function teleportHero(x, z, yawDeg = 0) {
+  return page.evaluate(
+    ([nextX, nextZ, nextYawDeg]) => window.__TEST__.teleportHero(nextX, nextZ, nextYawDeg),
+    [x, z, yawDeg],
+  );
+}
+
+function planarDistance(a, b) {
+  return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+try {
+  await page.goto(url, { waitUntil: "networkidle" });
+  await page.waitForFunction(() => window.__TEST__?.ready === true);
+  await page.waitForTimeout(1200);
+
+  const initial = await readState();
+  assert.equal(initial.stage?.id, "futuristic_city", "city stage should load before gameplay starts");
+  assert.ok(initial.currentGround, "city stage should expose an initial ground sample");
+  assert.ok(
+    Math.abs(initial.heroPosition.y - initial.currentGround.y) < 0.001,
+    "hero should spawn directly on the sampled stage ground",
+  );
+  assert.ok(
+    initial.route?.walkableMeshPrefixes.includes(initial.currentGround.baseName),
+    "spawn should land on the legal road mesh set",
+  );
+
+  await page.screenshot({ path: "artifacts/city-stage-road-readability.png" });
+
+  await page.keyboard.press("Digit9");
+  await page.waitForTimeout(120);
+  const routeDebugEnabled = await readState();
+  assert.equal(routeDebugEnabled.debug.route, true, "Digit9 should toggle the legal-road debug overlay");
+  await page.screenshot({ path: "artifacts/city-stage-route-debug.png" });
+  await page.keyboard.press("Digit9");
+  await page.waitForTimeout(80);
+
+  await page.keyboard.press("Digit4");
+  await page.waitForTimeout(120);
+  const afterBoundsToggle = await readState();
+  assert.equal(afterBoundsToggle.debug.bounds, true, "Digit4 should still toggle bounds debug");
+  await page.screenshot({ path: "artifacts/city-stage-probe-bounds.png" });
+  await page.keyboard.press("Digit4");
+  await page.waitForTimeout(80);
+
+  await page.keyboard.down("w");
+  await page.waitForTimeout(700);
+  const duringMove = await readState();
+  await page.keyboard.up("w");
+  assert.ok(
+    planarDistance(duringMove.heroPosition, initial.heroPosition) > 0.15,
+    "forward input should move the hero on the city stage",
+  );
+  assert.ok(duringMove.currentGround, "movement should keep returning a stage ground sample");
+  assert.ok(
+    Math.abs(duringMove.heroPosition.y - duringMove.currentGround.y) < 0.001,
+    "movement should keep the hero grounded to the sampled map surface",
+  );
+  await page.screenshot({ path: "artifacts/city-stage-probe-move.png" });
+
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(120);
+  const rollActive = await readState();
+  assert.equal(rollActive.actionLock, "roll", "space should start the roll action on the city stage");
+  assert.equal(rollActive.currentClip, "Roll", "roll startup should still select the roll clip");
+  await page.waitForTimeout(1500);
+  const rollRecovered = await readState();
+  assert.equal(rollRecovered.actionLock, null, "roll should recover back to normal control");
+  assert.ok(rollRecovered.currentGround, "roll recovery should still have a valid ground sample");
+  assert.ok(
+    Math.abs(rollRecovered.heroPosition.y - rollRecovered.currentGround.y) < 0.001,
+    "roll recovery should keep the hero attached to the map ground",
+  );
+
+  await page.evaluate(() => document.querySelector('[data-action="reset"]').click());
+  await page.waitForTimeout(180);
+  const afterReset = await readState();
+  assert.ok(
+    planarDistance(afterReset.heroPosition, initial.heroPosition) < 0.02,
+    "reset should return the hero to the configured city spawn",
+  );
+  assert.ok(
+    Math.abs(afterReset.heroPosition.y - initial.heroPosition.y) < 0.001,
+    "reset should restore the spawn ground height",
+  );
+
+  const illegalRoadAttempt = await teleportHero(20, -6, 0);
+  assert.equal(illegalRoadAttempt, false, "off-road teleport should be rejected by the legal-road contract");
+  const afterIllegalRoadAttempt = await readState();
+  assert.ok(
+    planarDistance(afterIllegalRoadAttempt.heroPosition, afterReset.heroPosition) < 0.001,
+    "failed off-road placement should leave the hero on the previous legal road position",
+  );
+  assert.equal(
+    afterIllegalRoadAttempt.currentGround?.baseName,
+    afterReset.currentGround?.baseName,
+    "failed off-road placement should not replace the tracked legal ground sample",
+  );
+
+  const alleyTeleport = await teleportHero(-48, -5, 0);
+  assert.equal(alleyTeleport, true, "legal alley clamp point should be reachable through the road contract");
+  await page.waitForTimeout(220);
+  const alleyState = await readState();
+  assert.equal(alleyState.currentGround?.baseName, "mesh_76", "alley clamp point should still sit on a legal road mesh");
+  assert.equal(alleyState.camera.clamped, true, "tight alley checkpoint should clamp the camera boom");
+  assert.ok(
+    alleyState.camera.clampedDistance < alleyState.camera.desiredDistance,
+    "camera clamp point should shorten the camera distance",
+  );
+  assert.ok(
+    alleyState.camera.activeOccluders.includes("mesh_77_14"),
+    "tight alley checkpoint should fade the remaining blocker mesh",
+  );
+  await page.screenshot({ path: "artifacts/city-stage-alley-clamp.png" });
+
+  const recoveredToSpawn = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 45);
+  assert.equal(recoveredToSpawn, true, "camera recovery pass should be able to restore the spawn road position");
+  await page.waitForTimeout(320);
+  const afterAlleyRecovery = await readState();
+  assert.ok(
+    planarDistance(afterAlleyRecovery.heroPosition, initial.heroPosition) < 0.02,
+    "camera recovery checkpoint should land back on the spawn road",
+  );
+  assert.equal(
+    afterAlleyRecovery.camera.activeOccluders.length,
+    0,
+    "faded alley blockers should recover once the hero leaves the obstruction",
+  );
+
+  await page.evaluate(() => {
+    const target = document.body;
+    target.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true,
+      clientX: 720,
+      clientY: 450,
+    }));
+    target.dispatchEvent(new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      buttons: 2,
+      clientX: 720,
+      clientY: 450,
+    }));
+  });
+  await page.waitForTimeout(180);
+  const pistolStance = await readState();
+  assert.equal(pistolStance.pistolPresented, true, "RMB should still present the pistol stance");
+  assert.equal(pistolStance.pistolAttachment?.visible, true, "pistol mesh should be visible in stance");
+
+  await page.evaluate(() => {
+    const target = document.body;
+    target.dispatchEvent(new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons: 3,
+      clientX: 720,
+      clientY: 450,
+    }));
+  });
+  await page.waitForTimeout(100);
+  const pistolShoot = await readState();
+  assert.equal(pistolShoot.upperClip, "Pistol_Shoot", "LMB in pistol stance should still fire");
+  assert.equal(pistolShoot.pistolAttachment?.visible, true, "pistol should remain visible while shooting");
+
+  await page.evaluate(() => {
+    const target = document.body;
+    target.dispatchEvent(new MouseEvent("mouseup", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      buttons: 0,
+      clientX: 720,
+      clientY: 450,
+    }));
+  });
+  await page.waitForTimeout(220);
+  const afterRelease = await readState();
+  assert.equal(afterRelease.pistolPresented, false, "releasing RMB should clear pistol stance");
+  assert.equal(afterRelease.currentGround?.objectName != null, true, "combat should not break stage grounding");
+
+  console.log(
+    JSON.stringify(
+      {
+        initial: {
+          stage: initial.stage,
+          heroPosition: initial.heroPosition,
+          currentGround: initial.currentGround,
+        },
+        routeDebugEnabled: {
+          debug: routeDebugEnabled.debug,
+        },
+        duringMove: {
+          heroPosition: duringMove.heroPosition,
+          currentGround: duringMove.currentGround,
+        },
+        rollActive: {
+          actionLock: rollActive.actionLock,
+          currentClip: rollActive.currentClip,
+        },
+        rollRecovered: {
+          actionLock: rollRecovered.actionLock,
+          heroPosition: rollRecovered.heroPosition,
+          currentGround: rollRecovered.currentGround,
+        },
+        afterReset: {
+          heroPosition: afterReset.heroPosition,
+          currentGround: afterReset.currentGround,
+        },
+        afterIllegalRoadAttempt: {
+          heroPosition: afterIllegalRoadAttempt.heroPosition,
+          currentGround: afterIllegalRoadAttempt.currentGround,
+        },
+        alleyState: {
+          heroPosition: alleyState.heroPosition,
+          currentGround: alleyState.currentGround,
+          camera: alleyState.camera,
+        },
+        afterAlleyRecovery: {
+          heroPosition: afterAlleyRecovery.heroPosition,
+          currentGround: afterAlleyRecovery.currentGround,
+          camera: afterAlleyRecovery.camera,
+        },
+        pistolStance: {
+          currentClip: pistolStance.currentClip,
+          pistolPresented: pistolStance.pistolPresented,
+        },
+        pistolShoot: {
+          currentClip: pistolShoot.currentClip,
+          upperClip: pistolShoot.upperClip,
+        },
+      },
+      null,
+      2,
+    ),
+  );
+} finally {
+  await browser.close();
+}
