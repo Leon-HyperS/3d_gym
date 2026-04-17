@@ -48,6 +48,7 @@ const CONFIG = {
   cameraYawPanLerp: 8.5,
   cameraYawSettleToleranceDeg: 2.5,
   cameraTargetHeight: 1.35,
+  pistolCameraTargetForwardOffset: 2.4,
   turnLerp: 10.5,
   baseYawOffset: Math.PI,
   aimDirectionDeadZoneDeg: 22.5,
@@ -551,8 +552,7 @@ function snapCameraToHero(hero) {
 
   syncCameraYawState(0);
   const camera = getActiveCameraSettings();
-  runtime.cameraTarget.copy(hero.root.position);
-  runtime.cameraTarget.y += camera.targetHeight;
+  setCameraTargetFromHero(runtime.cameraTarget, hero, camera);
   runtime.cameraLookTarget.copy(runtime.cameraTarget);
   const preferredView = resolvePreferredCameraView(runtime.cameraTarget, camera);
   runtime.camera.position.copy(preferredView.position);
@@ -569,6 +569,30 @@ function snapCameraToHero(hero) {
 
 function getPlayerFrontYawForCameraYaw(cameraYawDeg) {
   return THREE.MathUtils.degToRad(normalizeYawDegrees(cameraYawDeg + 180));
+}
+
+function setDirectionFromYaw(yaw, target = tempVector) {
+  target.set(Math.sin(yaw), 0, Math.cos(yaw));
+  if (target.lengthSq() < 0.0001) {
+    target.set(0, 0, 1);
+  } else {
+    target.normalize();
+  }
+  return target;
+}
+
+function setCameraTargetFromHero(target, hero, camera = getActiveCameraSettings()) {
+  target.copy(hero.root.position);
+  target.y += camera.targetHeight;
+
+  if (runtime.input.pistolStance) {
+    target.addScaledVector(
+      setDirectionFromYaw(hero.root.rotation.y),
+      CONFIG.pistolCameraTargetForwardOffset,
+    );
+  }
+
+  return target;
 }
 
 function shouldSuppressAimYawForCameraPan() {
@@ -3711,14 +3735,7 @@ function resetAimPointFromHero(hero) {
     return;
   }
 
-  tempVector.set(Math.sin(hero.root.rotation.y), 0, Math.cos(hero.root.rotation.y));
-  if (tempVector.lengthSq() < 0.0001) {
-    tempVector.set(0, 0, 1);
-  } else {
-    tempVector.normalize();
-  }
-
-  runtime.aimPoint.copy(hero.root.position).addScaledVector(tempVector, 4);
+  runtime.aimPoint.copy(hero.root.position).addScaledVector(setDirectionFromYaw(hero.root.rotation.y), 4);
   runtime.aimPoint.y = hero.root.position.y + (runtime.world?.stageData?.grounding.aimHeightOffset ?? 0.02);
 }
 
@@ -3972,8 +3989,7 @@ function updateCamera(dt) {
   const hero = runtime.hero;
   syncCameraYawState(dt);
   const camera = getActiveCameraSettings();
-  runtime.cameraTarget.copy(hero.root.position);
-  runtime.cameraTarget.y += camera.targetHeight;
+  setCameraTargetFromHero(runtime.cameraTarget, hero, camera);
 
   if (runtime.debug.orbit) {
     runtime.controls.enabled = true;

@@ -331,6 +331,10 @@ try {
   assert.equal(pistolStance.pistolPresented, true, "RMB should still present the pistol stance");
   assert.equal(pistolStance.pistolAttachment?.visible, true, "pistol mesh should be visible in stance");
   assert.ok(
+    planarDistance(pistolStance.camera.target, pistolStance.heroPosition) > 1.5,
+    "entering pistol stance should push the camera target ahead of the hero so screen center aims into the scene",
+  );
+  assert.ok(
     angleDifferenceDeg(pistolStance.camera.yawDeg, beforePistolPan.camera.yawDeg) > 2,
     "entering pistol stance should start the same camera pan as V",
   );

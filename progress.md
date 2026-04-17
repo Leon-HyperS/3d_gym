@@ -232,3 +232,11 @@ Original prompt: inspect the repo and understands how the assets are being lever
     - `node scripts/city-stage-probe.mjs http://127.0.0.1:4173/`
     - `node scripts/hud-probe.mjs http://127.0.0.1:4173/`
   - Retried the shared skill client at `C:\Users\leonl\.codex\skills\develop-web-game\scripts\web_game_playwright_client.js`; it still fails here with `ERR_MODULE_NOT_FOUND` for `playwright`, so the repo-local probes remain the reliable verification path in this environment.
+- Pistol-stance crosshair framing tweak:
+  - Adjusted `src/main.js` so the camera target moves `2.4` world units forward along the hero facing direction while pistol stance is active, instead of always centering the camera on the hero root.
+  - This keeps the crosshair visually centered in the viewport while making screen center correspond to a point ahead in the scene rather than landing directly on the hero's head during RMB stance entry.
+  - Refactored the shared camera target computation into `setCameraTargetFromHero()` and reused the same yaw-to-direction helper in the existing `resetAimPointFromHero()` path to keep the stance framing logic consistent.
+  - Expanded `scripts/city-stage-probe.mjs` to assert that entering pistol stance pushes the camera target ahead of the hero in world space, which protects the new over-the-shoulder framing from regressing silently.
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://localhost:5173/`
