@@ -70,6 +70,12 @@ try {
   assert.equal(initial.hudText.health, "86%", "health HUD should render the demo value");
   assert.equal(initial.hudText.stamina, "100%", "stamina HUD should start full");
   assert.equal(initial.hudText.slotCount, 5, "HUD should render five slots");
+  assert.equal(initial.weaponMode, "none", "no weapon should be selected on startup");
+  assert.deepEqual(
+    initial.hud.activeSlots.slice(0, 2),
+    [false, false],
+    "weapon HUD slots should start inactive",
+  );
   assert.equal(initial.uiShell?.hiddenClass, false, "menu shell should start visible");
   assert.equal(initial.hudVisibility?.visibility, "visible", "HUD should be visible");
   assert.ok(initial.hudVisibility?.width > 0, "HUD should occupy layout space");
@@ -174,9 +180,47 @@ try {
 
   await page.screenshot({ path: "hud-probe-hidden.png" });
 
+  await page.keyboard.press("Digit1");
+  await page.waitForTimeout(80);
+  const pistolSelected = await readUiState();
+  assert.equal(pistolSelected.weaponMode, "pistol", "Digit1 should toggle pistol mode on");
+  assert.deepEqual(
+    pistolSelected.hud.activeSlots.slice(0, 2),
+    [true, false],
+    "Digit1 should activate the first weapon HUD slot only",
+  );
+
+  await page.keyboard.press("Digit1");
+  await page.waitForTimeout(80);
+  const pistolHolstered = await readUiState();
+  assert.equal(pistolHolstered.weaponMode, "none", "pressing Digit1 again should holster the pistol");
+  assert.deepEqual(
+    pistolHolstered.hud.activeSlots.slice(0, 2),
+    [false, false],
+    "holstering the pistol should clear both weapon HUD slots",
+  );
+
+  await page.keyboard.press("Digit2");
+  await page.waitForTimeout(80);
+  const rifleSelected = await readUiState();
+  assert.equal(rifleSelected.weaponMode, "rifle", "Digit2 should toggle rifle mode on");
+  assert.deepEqual(
+    rifleSelected.hud.activeSlots.slice(0, 2),
+    [false, true],
+    "Digit2 should activate the second weapon HUD slot only",
+  );
+
+  await page.keyboard.press("Digit2");
+  await page.waitForTimeout(80);
+  const rifleHolstered = await readUiState();
+  assert.equal(rifleHolstered.weaponMode, "none", "pressing Digit2 again should holster the rifle");
+  assert.deepEqual(
+    rifleHolstered.hud.activeSlots.slice(0, 2),
+    [false, false],
+    "holstering the rifle should clear both weapon HUD slots",
+  );
+
   const debugKeysByShortcut = [
-    ["Digit1", "grid"],
-    ["Digit2", "axes"],
     ["Digit3", "origin"],
     ["Digit4", "bounds"],
     ["Digit5", "skeleton"],
@@ -239,6 +283,24 @@ try {
           crosshair: afterF1.crosshair,
           debug: afterF1.debug,
           uiShell: afterF1.uiShell,
+        },
+        weaponToggles: {
+          pistolSelected: {
+            weaponMode: pistolSelected.weaponMode,
+            activeSlots: pistolSelected.hud.activeSlots,
+          },
+          pistolHolstered: {
+            weaponMode: pistolHolstered.weaponMode,
+            activeSlots: pistolHolstered.hud.activeSlots,
+          },
+          rifleSelected: {
+            weaponMode: rifleSelected.weaponMode,
+            activeSlots: rifleSelected.hud.activeSlots,
+          },
+          rifleHolstered: {
+            weaponMode: rifleHolstered.weaponMode,
+            activeSlots: rifleHolstered.hud.activeSlots,
+          },
         },
         digitChecks,
       },

@@ -461,6 +461,46 @@
               }
             ]
           }
+        },
+        {
+          "id": "rifle_idle_upper",
+          "displayName": "Rifle Idle Upper",
+          "path": "/assets/Rifle/glb/Rifle Idle.glb",
+          "role": "weapon_overlay_pack",
+          "summary": "Shared-rig rifle-ready idle pose used as an upper-body overlay while the lower-body locomotion continues to use the base move set.",
+          "compatibility": {
+            "baseAssetId": "universal",
+            "expectedSharedSkin": "Armature",
+            "matchingNamedNodeSet": false,
+            "allowExtraNamedNodes": true,
+            "integrationNote": "The source rig adds terminal *_end helper bones, so runtime merge filters its tracks back to the base rig before registering the clip."
+          },
+          "mergePolicy": {
+            "filterTracksToBaseRig": true,
+            "renameClips": {
+              "Armature|mixamo.com|Layer0": "Rifle_Idle_Loop"
+            }
+          }
+        },
+        {
+          "id": "rifle_shoot_upper",
+          "displayName": "Rifle Shoot Upper",
+          "path": "/assets/Rifle/glb/Firing Rifle.glb",
+          "role": "weapon_overlay_pack",
+          "summary": "Shared-rig rifle firing pose used as an upper-body one-shot while the lower body continues grounded locomotion.",
+          "compatibility": {
+            "baseAssetId": "universal",
+            "expectedSharedSkin": "Armature",
+            "matchingNamedNodeSet": false,
+            "allowExtraNamedNodes": true,
+            "integrationNote": "The source rig adds terminal *_end helper bones, so runtime merge filters its tracks back to the base rig before registering the clip."
+          },
+          "mergePolicy": {
+            "filterTracksToBaseRig": true,
+            "renameClips": {
+              "Armature|mixamo.com|Layer0": "Rifle_Shoot"
+            }
+          }
         }
       ],
       "attachments": {
@@ -521,6 +561,64 @@
             "horizontalOnly": true
           },
           "notes": "Attach through the dedicated right-hand weapon socket. The socket defines the grip orientation in hand space, the mesh offset calibrates the prop fit, and the aim pivot rotates the barrel axis toward the world-space crosshair target."
+        },
+        "rifle": {
+          "path": "/assets/SCAR.glb",
+          "socket": {
+            "parentBoneName": "hand_r",
+            "socketName": "rifle_socket_r",
+            "position": {
+              "x": -0.0118,
+              "y": 0.0722,
+              "z": 0.0141
+            },
+            "rotationDeg": {
+              "x": -100.61,
+              "y": 1.72,
+              "z": 165.29
+            }
+          },
+          "meshOffset": {
+            "position": {
+              "x": 0.48,
+              "y": -0.04,
+              "z": 0.08
+            },
+            "rotationDeg": {
+              "x": 0,
+              "y": -90,
+              "z": 0
+            },
+            "scale": {
+              "x": 0.22,
+              "y": 0.22,
+              "z": 0.22
+            }
+          },
+          "muzzleOffset": {
+            "position": {
+              "x": 7.1,
+              "y": 0.02,
+              "z": 0
+            },
+            "rotationDeg": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          },
+          "aiming": {
+            "enabled": true,
+            "forwardAxis": "+x",
+            "upAxis": "+y",
+            "horizontalOnly": true
+          },
+          "notes": "Attach through the same calibrated right-hand weapon socket as the pistol. The rifle keeps the lower-body locomotion intact while presenting a longer upper-body-only gun pose."
         }
       },
       "prototypeUtility": {

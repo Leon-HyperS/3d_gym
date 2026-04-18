@@ -292,76 +292,107 @@ try {
     "faded alley blockers should recover once the hero leaves the obstruction",
   );
 
-  const pistolPanSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
-  assert.equal(pistolPanSetup, true, "pistol stance pan setup should land back on a legal road");
+  const weaponSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
+  assert.equal(weaponSetup, true, "weapon setup should land back on a legal road");
   await movePointer(1090, 260);
   await page.waitForTimeout(220);
   await page.keyboard.down("KeyW");
   await page.waitForTimeout(200);
-  const beforePistolPan = await readState();
+  const beforeWeaponSelect = await readState();
   assert.ok(
-    angleDifferenceDeg(beforePistolPan.camera.yawDeg, normalizeYawDeg((beforePistolPan.rootYaw * 180) / Math.PI + 180)) > 20,
-    "pistol stance pan setup should start with the camera offset from the recentered behind-the-hero angle",
+    angleDifferenceDeg(beforeWeaponSelect.camera.yawDeg, normalizeYawDeg((beforeWeaponSelect.rootYaw * 180) / Math.PI + 180)) > 20,
+    "weapon setup should start with the camera offset from the recentered behind-the-hero angle",
   );
   assert.ok(
-    beforePistolPan.pistolMuzzleFlash,
+    beforeWeaponSelect.pistolMuzzleFlash,
     "startup should expose the pistol muzzle flash test seam",
   );
+  assert.ok(
+    beforeWeaponSelect.rifleMuzzleFlash,
+    "startup should expose the rifle muzzle flash test seam",
+  );
 
-  const preStanceMuzzleTriggerCount = beforePistolPan.pistolMuzzleFlash.triggerCount;
+  const idlePistolTriggerCount = beforeWeaponSelect.pistolMuzzleFlash.triggerCount;
+  const idleRifleTriggerCount = beforeWeaponSelect.rifleMuzzleFlash.triggerCount;
   await mouseDown(0, 1, 1090, 260);
   await page.waitForTimeout(80);
   await mouseUp(0, 0, 1090, 260);
-  const afterInvalidPistolClick = await readState();
+  const afterInvalidUnarmedClick = await readState();
   assert.equal(
-    afterInvalidPistolClick.pistolMuzzleFlash.triggerCount,
-    preStanceMuzzleTriggerCount,
-    "LMB outside pistol stance should not trigger the muzzle flash",
+    afterInvalidUnarmedClick.pistolMuzzleFlash.triggerCount,
+    idlePistolTriggerCount,
+    "LMB without a selected weapon should not trigger the pistol muzzle flash",
+  );
+  assert.equal(
+    afterInvalidUnarmedClick.rifleMuzzleFlash.triggerCount,
+    idleRifleTriggerCount,
+    "LMB without a selected weapon should not trigger the rifle muzzle flash",
   );
   assert.notEqual(
-    afterInvalidPistolClick.upperClip,
+    afterInvalidUnarmedClick.upperClip,
     "Pistol_Shoot",
-    "LMB outside pistol stance should not enter the pistol shot clip",
+    "LMB without a selected weapon should not enter the pistol shot clip",
+  );
+  assert.notEqual(
+    afterInvalidUnarmedClick.upperClip,
+    "Rifle_Shoot",
+    "LMB without a selected weapon should not enter the rifle shot clip",
+  );
+
+  await page.keyboard.press("Digit1");
+  await page.waitForTimeout(100);
+  const pistolSelected = await readState();
+  assert.equal(pistolSelected.weaponMode, "pistol", "Digit1 should select pistol mode");
+  assert.equal(pistolSelected.pistolPresented, true, "Digit1 should present the pistol stance");
+  assert.equal(pistolSelected.pistolAttachment?.visible, true, "pistol mesh should be visible after selecting pistol mode");
+  assert.equal(pistolSelected.rifleAttachment?.visible, false, "rifle mesh should stay hidden while pistol mode is active");
+  assert.equal(
+    pistolSelected.cameraAngleShiftActive,
+    false,
+    "selecting pistol mode should not arm the RMB camera-shift state",
+  );
+  assert.ok(
+    planarDistance(pistolSelected.camera.target, pistolSelected.heroPosition) < 0.05,
+    "selecting pistol mode should not push the camera target ahead of the hero on its own",
   );
 
   await mouseDown(2, 2, 1090, 260);
   await page.waitForTimeout(80);
-  const pistolStance = await readState();
-  const expectedPistolFrontYawDeg = normalizeYawDeg(pistolStance.camera.targetYawDeg + 180);
-  assert.equal(pistolStance.pistolPresented, true, "RMB should still present the pistol stance");
-  assert.equal(pistolStance.pistolAttachment?.visible, true, "pistol mesh should be visible in stance");
+  const afterCameraShift = await readState();
+  const expectedShiftFrontYawDeg = normalizeYawDeg(afterCameraShift.camera.targetYawDeg + 180);
   assert.ok(
-    planarDistance(pistolStance.camera.target, pistolStance.heroPosition) > 1.5,
-    "entering pistol stance should push the camera target ahead of the hero so screen center aims into the scene",
+    angleDifferenceDeg(afterCameraShift.camera.yawDeg, pistolSelected.camera.yawDeg) > 2,
+    "RMB should still start the camera pan quickly",
   );
   assert.ok(
-    angleDifferenceDeg(pistolStance.camera.yawDeg, beforePistolPan.camera.yawDeg) > 2,
-    "entering pistol stance should start the same camera pan as V",
+    angleDifferenceDeg(afterCameraShift.camera.yawDeg, afterCameraShift.camera.targetYawDeg) > 4,
+    "RMB camera motion should still ease instead of finishing in one frame",
   );
   assert.ok(
-    angleDifferenceDeg(pistolStance.camera.yawDeg, pistolStance.camera.targetYawDeg) > 4,
-    "pistol stance camera recenter should ease instead of snapping in one frame",
-  );
-  assert.ok(
-    angleDifferenceDeg((pistolStance.rootYaw * 180) / Math.PI, expectedPistolFrontYawDeg) < 2,
-    "entering pistol stance should immediately rotate the hero to player-front for the target camera angle",
-  );
-  assert.ok(
-    Math.abs(pistolStance.mouse.x - beforePistolPan.mouse.x) < 1 &&
-    Math.abs(pistolStance.mouse.y - beforePistolPan.mouse.y) < 1,
-    "entering pistol stance should preserve the current pointer screen position instead of forcing screen center",
-  );
-  assert.ok(
-    pistolStance.pistolAttachment?.muzzleAnchorLocalPosition?.x > 0.1,
-    "pistol stance should expose a forward muzzle anchor offset for the flash attachment",
+    angleDifferenceDeg((afterCameraShift.rootYaw * 180) / Math.PI, expectedShiftFrontYawDeg) < 2,
+    "RMB should still rotate the hero to player-front for the target camera angle immediately",
   );
   assert.equal(
-    pistolStance.aimYawSuppressed,
+    afterCameraShift.cameraAngleShiftActive,
     true,
-    "entering pistol stance should temporarily suppress aim-driven yaw while the camera pan settles",
+    "RMB should arm the camera-shift state while held",
   );
   assert.ok(
-    angleDifferenceDeg((pistolStance.rootYaw * 180) / Math.PI, (beforePistolPan.rootYaw * 180) / Math.PI) < 10,
+    planarDistance(afterCameraShift.camera.target, afterCameraShift.heroPosition) > 1.5,
+    "RMB should still push the camera target ahead of the hero while held",
+  );
+  assert.ok(
+    Math.abs(afterCameraShift.mouse.x - pistolSelected.mouse.x) < 1 &&
+    Math.abs(afterCameraShift.mouse.y - pistolSelected.mouse.y) < 1,
+    "RMB should preserve the current pointer screen position instead of forcing screen center",
+  );
+  assert.equal(
+    afterCameraShift.aimYawSuppressed,
+    true,
+    "RMB should still temporarily suppress aim-driven yaw while the camera pan settles",
+  );
+  assert.ok(
+    angleDifferenceDeg((afterCameraShift.rootYaw * 180) / Math.PI, (pistolSelected.rootYaw * 180) / Math.PI) < 10,
     "W plus RMB should keep the hero from whipping into a large yaw flip during the first pan frames",
   );
 
@@ -373,100 +404,98 @@ try {
     "W plus RMB should keep aim-yaw suppression active while the recenter pan is still settling",
   );
   assert.ok(
-    angleDifferenceDeg((pistolForwardHold.rootYaw * 180) / Math.PI, (beforePistolPan.rootYaw * 180) / Math.PI) < 15,
+    angleDifferenceDeg((pistolForwardHold.rootYaw * 180) / Math.PI, (pistolSelected.rootYaw * 180) / Math.PI) < 15,
     "W plus RMB should keep the hero yaw stable through the early pan instead of spinning around",
   );
+  await mouseUp(2, 0, 1090, 260);
   await page.keyboard.up("KeyW");
-  await page.waitForTimeout(200);
-  const afterPistolPan = await readState();
-  assert.ok(
-    angleDifferenceDeg(afterPistolPan.camera.yawDeg, afterPistolPan.camera.targetYawDeg)
-      < angleDifferenceDeg(pistolStance.camera.yawDeg, pistolStance.camera.targetYawDeg),
-    "pistol stance camera should keep panning closer to the target angle over time",
+  await page.waitForTimeout(220);
+  const afterCameraShiftRelease = await readState();
+  assert.equal(afterCameraShiftRelease.weaponMode, "pistol", "releasing RMB should not clear the selected pistol mode");
+  assert.equal(afterCameraShiftRelease.pistolPresented, true, "releasing RMB should keep the pistol stance active");
+  assert.equal(
+    afterCameraShiftRelease.cameraAngleShiftActive,
+    false,
+    "releasing RMB should clear the camera-shift held state",
   );
-  await page.screenshot({ path: "artifacts/city-stage-pistol-pan.png" });
+  assert.ok(
+    angleDifferenceDeg(afterCameraShiftRelease.camera.yawDeg, afterCameraShiftRelease.camera.targetYawDeg)
+      < angleDifferenceDeg(afterCameraShift.camera.yawDeg, afterCameraShift.camera.targetYawDeg),
+    "RMB camera shift should keep panning closer to the target angle over time",
+  );
+  await page.screenshot({ path: "artifacts/city-stage-rmb-camera-shift.png" });
 
-  const triggerCountBeforeShot = afterPistolPan.pistolMuzzleFlash.triggerCount;
-  await mouseDown(0, 3, 720, 450);
+  const pistolTriggerCountBeforeShot = afterCameraShiftRelease.pistolMuzzleFlash.triggerCount;
+  await mouseDown(0, 1, 720, 450);
   await page.waitForTimeout(100);
   const pistolShoot = await readState();
-  assert.equal(pistolShoot.upperClip, "Pistol_Shoot", "LMB in pistol stance should still fire");
+  assert.equal(pistolShoot.upperClip, "Pistol_Shoot", "LMB in pistol mode should fire the pistol");
   assert.equal(pistolShoot.pistolAttachment?.visible, true, "pistol should remain visible while shooting");
   assert.equal(
     pistolShoot.pistolMuzzleFlash.triggerCount,
-    triggerCountBeforeShot + 1,
-    "accepted pistol shots should increment the muzzle flash trigger count",
+    pistolTriggerCountBeforeShot + 1,
+    "accepted pistol shots should increment the pistol muzzle flash trigger count",
   );
   assert.equal(
     pistolShoot.pistolMuzzleFlash.active,
     true,
-    "accepted pistol shots should activate the muzzle flash",
+    "accepted pistol shots should activate the pistol muzzle flash",
   );
-  await mouseUp(0, 2, 720, 450);
-
-  await mouseUp(2, 0, 720, 450);
-  await page.waitForTimeout(260);
-  const afterRelease = await readState();
-  assert.equal(afterRelease.pistolPresented, false, "releasing RMB should clear pistol stance");
-  assert.equal(afterRelease.currentGround?.objectName != null, true, "combat should not break stage grounding");
-  assert.equal(
-    afterRelease.pistolMuzzleFlash.active,
-    false,
-    "the muzzle flash should settle back to inactive shortly after the shot",
-  );
-
-  const alignSetup = await teleportHero(initial.heroPosition.x, initial.heroPosition.z, 135);
-  assert.equal(alignSetup, true, "snap-camera alignment setup should land back on a legal road");
-  await page.evaluate(() => {
-    const target = document.body;
-    target.dispatchEvent(new PointerEvent("pointermove", {
-      bubbles: true,
-      clientX: 1090,
-      clientY: 260,
-    }));
-  });
+  await mouseUp(0, 0, 720, 450);
   await page.waitForTimeout(220);
-  const beforeCameraAlign = await readState();
-  assert.ok(
-    angleDifferenceDeg(beforeCameraAlign.camera.yawDeg, normalizeYawDeg((beforeCameraAlign.rootYaw * 180) / Math.PI + 180)) > 20,
-    "snap-camera setup should start with the camera offset from the recentered behind-the-hero angle",
-  );
-  await page.keyboard.press("KeyV");
-  await page.waitForTimeout(80);
-  const duringCameraAlign = await readState();
-  const expectedPlayerFrontYawDeg = normalizeYawDeg(duringCameraAlign.camera.targetYawDeg + 180);
-  assert.ok(
-    angleDifferenceDeg(duringCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 2,
-    "V should start moving the camera toward the new angle quickly",
-  );
-  assert.ok(
-    angleDifferenceDeg(duringCameraAlign.camera.yawDeg, duringCameraAlign.camera.targetYawDeg) > 4,
-    "V camera motion should pan instead of finishing in a single frame",
+  const afterPistolShot = await readState();
+  assert.equal(afterPistolShot.currentGround?.objectName != null, true, "pistol combat should not break stage grounding");
+
+  await page.keyboard.press("Digit2");
+  await page.waitForTimeout(100);
+  const rifleSelected = await readState();
+  assert.equal(rifleSelected.weaponMode, "rifle", "Digit2 should switch from pistol to rifle mode");
+  assert.equal(rifleSelected.riflePresented, true, "Digit2 should present the rifle stance");
+  assert.equal(rifleSelected.rifleAttachment?.visible, true, "rifle mesh should be visible after switching to rifle mode");
+  assert.equal(rifleSelected.pistolAttachment?.visible, false, "pistol mesh should hide once rifle mode is active");
+  assert.equal(
+    rifleSelected.cameraAngleShiftActive,
+    false,
+    "selecting rifle mode should not arm the RMB camera-shift state",
   );
   assert.ok(
-    angleDifferenceDeg((duringCameraAlign.rootYaw * 180) / Math.PI, expectedPlayerFrontYawDeg) < 2,
-    "V should rotate the hero to face player-front for the target camera angle immediately",
+    planarDistance(rifleSelected.camera.target, rifleSelected.heroPosition) < 0.05,
+    "selecting rifle mode should not change camera target framing on its own",
   );
-  await page.waitForTimeout(520);
-  const afterCameraAlign = await readState();
-  assert.ok(
-    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, afterCameraAlign.camera.targetYawDeg)
-      < angleDifferenceDeg(duringCameraAlign.camera.yawDeg, duringCameraAlign.camera.targetYawDeg),
-    "V should keep panning the camera closer to the target angle over time",
+
+  const rifleTriggerCountBeforeShot = rifleSelected.rifleMuzzleFlash.triggerCount;
+  await mouseDown(0, 1, 720, 450);
+  await page.waitForTimeout(100);
+  const rifleShoot = await readState();
+  assert.equal(rifleShoot.upperClip, "Rifle_Shoot", "LMB in rifle mode should fire the rifle");
+  assert.equal(rifleShoot.rifleAttachment?.visible, true, "rifle should remain visible while shooting");
+  assert.equal(
+    rifleShoot.rifleMuzzleFlash.triggerCount,
+    rifleTriggerCountBeforeShot + 1,
+    "accepted rifle shots should increment the rifle muzzle flash trigger count",
   );
-  assert.ok(
-    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,
-    "V should visibly pan the camera to a new alignment angle",
+  assert.equal(
+    rifleShoot.rifleMuzzleFlash.active,
+    true,
+    "accepted rifle shots should activate the rifle muzzle flash",
   );
-  assert.ok(
-    Math.abs(afterCameraAlign.mouse.x - beforeCameraAlign.mouse.x) < 1 &&
-    Math.abs(afterCameraAlign.mouse.y - beforeCameraAlign.mouse.y) < 1,
-    "V should preserve the current pointer screen position instead of forcing the crosshair to screen center",
+  await mouseUp(0, 0, 720, 450);
+  await page.waitForTimeout(220);
+  const afterRifleShot = await readState();
+  assert.equal(afterRifleShot.currentGround?.objectName != null, true, "rifle combat should not break stage grounding");
+  assert.equal(
+    afterRifleShot.pistolMuzzleFlash.triggerCount,
+    pistolShoot.pistolMuzzleFlash.triggerCount,
+    "switching to rifle should not retrigger the pistol muzzle flash",
   );
-  assert.ok(
-    angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,
-    "V should visibly snap the camera instead of leaving it in the previous angle",
-  );
+
+  await page.keyboard.press("Digit2");
+  await page.waitForTimeout(120);
+  const afterHolster = await readState();
+  assert.equal(afterHolster.weaponMode, "none", "pressing Digit2 again should holster the rifle");
+  assert.equal(afterHolster.pistolPresented, false, "holstering the rifle should leave no pistol stance active");
+  assert.equal(afterHolster.riflePresented, false, "holstering the rifle should clear the rifle stance");
+  assert.equal(afterHolster.rifleAttachment?.visible, false, "holstering the rifle should hide the rifle mesh");
 
   console.log(
     JSON.stringify(
@@ -531,29 +560,44 @@ try {
           currentGround: afterAlleyRecovery.currentGround,
           camera: afterAlleyRecovery.camera,
         },
-        pistolStance: {
-          before: beforePistolPan.camera,
-          during: pistolStance.camera,
+        weaponSelection: {
+          before: beforeWeaponSelect.camera,
+          pistolSelected: {
+            weaponMode: pistolSelected.weaponMode,
+            camera: pistolSelected.camera,
+            pistolPresented: pistolSelected.pistolPresented,
+          },
+          rifleSelected: {
+            weaponMode: rifleSelected.weaponMode,
+            camera: rifleSelected.camera,
+            riflePresented: rifleSelected.riflePresented,
+          },
+          afterHolster: {
+            weaponMode: afterHolster.weaponMode,
+            camera: afterHolster.camera,
+          },
+        },
+        cameraShift: {
+          before: pistolSelected.camera,
+          during: afterCameraShift.camera,
           forwardHold: pistolForwardHold.camera,
-          after: afterPistolPan.camera,
-          currentClip: pistolStance.currentClip,
-          pistolPresented: pistolStance.pistolPresented,
-          rootYaw: pistolStance.rootYaw,
+          after: afterCameraShiftRelease.camera,
+          currentClip: afterCameraShift.currentClip,
+          pistolPresented: afterCameraShift.pistolPresented,
+          rootYaw: afterCameraShift.rootYaw,
           forwardHoldRootYaw: pistolForwardHold.rootYaw,
-          aimYawSuppressed: pistolStance.aimYawSuppressed,
-          mouse: pistolStance.mouse,
+          aimYawSuppressed: afterCameraShift.aimYawSuppressed,
+          mouse: afterCameraShift.mouse,
         },
         pistolShoot: {
           currentClip: pistolShoot.currentClip,
           upperClip: pistolShoot.upperClip,
+          muzzleFlash: pistolShoot.pistolMuzzleFlash,
         },
-        cameraAlign: {
-          before: beforeCameraAlign.camera,
-          during: duringCameraAlign.camera,
-          after: afterCameraAlign.camera,
-          beforeRootYaw: beforeCameraAlign.rootYaw,
-          afterRootYaw: afterCameraAlign.rootYaw,
-          mouse: afterCameraAlign.mouse,
+        rifleShoot: {
+          currentClip: rifleShoot.currentClip,
+          upperClip: rifleShoot.upperClip,
+          muzzleFlash: rifleShoot.rifleMuzzleFlash,
         },
       },
       null,

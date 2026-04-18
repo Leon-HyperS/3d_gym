@@ -94,9 +94,34 @@ const ACTIONS = {
   dodgeRight: "Dodge_Right",
   pistolStance: "Pistol_Idle_Loop",
   pistolShoot: "Pistol_Shoot",
+  rifleStance: "Rifle_Idle_Loop",
+  rifleShoot: "Rifle_Shoot",
   parry: "Idle_Shield_Break",
   leftPunch: "Punch_Jab",
   rightPunch: "Punch_Cross",
+};
+
+const WEAPON_MODES = {
+  none: "none",
+  pistol: "pistol",
+  rifle: "rifle",
+};
+
+const ACTIVE_WEAPON_MODES = [WEAPON_MODES.pistol, WEAPON_MODES.rifle];
+
+const WEAPON_STANCE_ACTIONS = {
+  [WEAPON_MODES.pistol]: ACTIONS.pistolStance,
+  [WEAPON_MODES.rifle]: ACTIONS.rifleStance,
+};
+
+const WEAPON_SHOOT_ACTIONS = {
+  [WEAPON_MODES.pistol]: ACTIONS.pistolShoot,
+  [WEAPON_MODES.rifle]: ACTIONS.rifleShoot,
+};
+
+const WEAPON_HUD_SLOT_INDEX = {
+  [WEAPON_MODES.pistol]: 0,
+  [WEAPON_MODES.rifle]: 1,
 };
 
 const DIRECTIONAL_ACTION_KEYS = {
@@ -170,6 +195,8 @@ const REQUIRED_ACTION_KEYS = [
   "dodgeRight",
   "pistolStance",
   "pistolShoot",
+  "rifleStance",
+  "rifleShoot",
   "parry",
   "leftPunch",
   "rightPunch",
@@ -196,7 +223,7 @@ const CTRL_SHORTCUT_BLOCKED_CODES = new Set([
 ]);
 
 const DEFAULT_HUD_SLOT_STATES = [
-  { indexLabel: "1", active: true },
+  { indexLabel: "1", active: false },
   { indexLabel: "2", active: false },
   { indexLabel: "3", active: false },
   { indexLabel: "4", active: false },
@@ -337,7 +364,8 @@ const runtime = {
     right: false,
     sprintModifier: false,
     crouchModifier: false,
-    pistolStance: false,
+    weaponMode: WEAPON_MODES.none,
+    cameraAngleShiftActive: false,
     parryModifier: false,
   },
   cameraTarget: new THREE.Vector3(0, 1.3, 0),
@@ -369,6 +397,84 @@ const runtime = {
     pistolMuzzleFlashTexture: null,
   },
 };
+
+function getActiveWeaponMode() {
+  return ACTIVE_WEAPON_MODES.includes(runtime.input.weaponMode)
+    ? runtime.input.weaponMode
+    : WEAPON_MODES.none;
+}
+
+function isWeaponModeActive(mode) {
+  return getActiveWeaponMode() === mode;
+}
+
+function hasActiveWeaponMode() {
+  return getActiveWeaponMode() !== WEAPON_MODES.none;
+}
+
+function getWeaponDisplayName(mode) {
+  if (mode === WEAPON_MODES.pistol) {
+    return "Pistol";
+  }
+  if (mode === WEAPON_MODES.rifle) {
+    return "Rifle";
+  }
+  return "Weapons";
+}
+
+function getActiveWeaponAttachment(hero = runtime.hero) {
+  const weaponMode = getActiveWeaponMode();
+  if (weaponMode === WEAPON_MODES.none) {
+    return null;
+  }
+  return hero?.attachments?.[weaponMode] ?? null;
+}
+
+function syncWeaponHudSlots() {
+  for (const slot of runtime.hud.slots) {
+    slot.active = false;
+  }
+
+  for (const [mode, index] of Object.entries(WEAPON_HUD_SLOT_INDEX)) {
+    if (runtime.hud.slots[index]) {
+      runtime.hud.slots[index].active = isWeaponModeActive(mode);
+    }
+  }
+
+  renderHud();
+}
+
+function setWeaponMode(nextMode, { announce = true } = {}) {
+  const normalizedMode = ACTIVE_WEAPON_MODES.includes(nextMode)
+    ? nextMode
+    : WEAPON_MODES.none;
+  if (runtime.input.weaponMode === normalizedMode) {
+    return false;
+  }
+
+  runtime.input.weaponMode = normalizedMode;
+  syncWeaponHudSlots();
+  if (runtime.hero) {
+    syncGroundedAnimation(runtime.hero, true);
+  }
+
+  if (announce) {
+    showToast(
+      normalizedMode === WEAPON_MODES.none
+        ? "Weapons holstered"
+        : `${getWeaponDisplayName(normalizedMode)} ready`,
+    );
+  }
+
+  return true;
+}
+
+function toggleWeaponMode(mode, { announce = true } = {}) {
+  return setWeaponMode(
+    isWeaponModeActive(mode) ? WEAPON_MODES.none : mode,
+    { announce },
+  );
+}
 
 const UP = new THREE.Vector3(0, 1, 0);
 const tempForward = new THREE.Vector3();
@@ -457,7 +563,7 @@ async function init() {
   window.__TEST__.ready = true;
 
   showToast(
-    `${runtime.world?.stageData?.displayName ?? "Debug Gym"} ready. RMB / WASD / Shift / Ctrl / Space`,
+    `${runtime.world?.stageData?.displayName ?? "Debug Gym"} ready. 1 pistol / 2 rifle / RMB recenter`,
     2600,
   );
   runtime.clock.start();
@@ -585,7 +691,7 @@ function setCameraTargetFromHero(target, hero, camera = getActiveCameraSettings(
   target.copy(hero.root.position);
   target.y += camera.targetHeight;
 
-  if (runtime.input.pistolStance) {
+  if (runtime.input.cameraAngleShiftActive) {
     target.addScaledVector(
       setDirectionFromYaw(hero.root.rotation.y),
       CONFIG.pistolCameraTargetForwardOffset,
@@ -640,17 +746,8 @@ function snapCameraAndFacePlayerFront() {
   );
 }
 
-function setPistolStanceActive(nextActive) {
-  const active = Boolean(nextActive);
-  if (runtime.input.pistolStance === active) {
-    return false;
-  }
-
-  runtime.input.pistolStance = active;
-  if (active) {
-    snapCameraAndFacePlayerFront();
-  }
-  return true;
+function triggerCameraAngleShift() {
+  snapCameraAndFacePlayerFront();
 }
 
 function getTopDownOcclusionCameraSettings(baseCamera, world = runtime.world) {
@@ -1076,17 +1173,14 @@ function bindKeyboard() {
       case "KeyF":
         runtime.input.parryModifier = true;
         break;
-      case "KeyV":
-        snapCameraAndFacePlayerFront();
-        break;
       case "F1":
         hideMenusAndClearDebug();
         break;
       case "Digit1":
-        toggleDebugFlag("grid");
+        toggleWeaponMode(WEAPON_MODES.pistol);
         break;
       case "Digit2":
-        toggleDebugFlag("axes");
+        toggleWeaponMode(WEAPON_MODES.rifle);
         break;
       case "Digit3":
         toggleDebugFlag("origin");
@@ -1178,28 +1272,28 @@ function bindPointer() {
   window.addEventListener("mousedown", (event) => {
     const targetElement = event.target instanceof Element ? event.target : null;
     const overUi = Boolean(targetElement?.closest(".panel"));
-    const rightMouseHeld = (event.buttons & 2) === 2 || runtime.input.pistolStance;
 
-    if (event.button === 0 && rightMouseHeld && !overUi) {
+    if (event.button === 0 && hasActiveWeaponMode() && !overUi) {
       event.preventDefault();
-      requestPistolShoot();
+      requestWeaponShoot();
       return;
     }
 
     if (event.button === 2) {
       event.preventDefault();
-      setPistolStanceActive(true);
+      runtime.input.cameraAngleShiftActive = true;
+      triggerCameraAngleShift();
     }
   });
 
   window.addEventListener("mouseup", (event) => {
     if (event.button === 2) {
-      setPistolStanceActive(false);
+      runtime.input.cameraAngleShiftActive = false;
     }
   });
 
   window.addEventListener("pointercancel", () => {
-    setPistolStanceActive(false);
+    runtime.input.cameraAngleShiftActive = false;
   });
 
   window.addEventListener("pointermove", (event) => {
@@ -1217,7 +1311,7 @@ function bindPointer() {
   });
 
   window.addEventListener("blur", () => {
-    setPistolStanceActive(false);
+    runtime.input.cameraAngleShiftActive = false;
     runtime.input.parryModifier = false;
     setCloseGuardModifierHeld(false);
   });
@@ -1905,12 +1999,12 @@ function normalizeAssetAttachments(attachments) {
     throw new Error("Asset contract attachments must be an object");
   }
 
-  const normalized = { ...attachments };
-  if (attachments.pistol) {
-    normalized.pistol = normalizeSocketAttachmentDefinition("pistol", attachments.pistol);
-  }
-
-  return normalized;
+  return Object.fromEntries(
+    Object.entries(attachments).map(([key, attachment]) => [
+      key,
+      normalizeSocketAttachmentDefinition(key, attachment),
+    ]),
+  );
 }
 
 function normalizeAssetContract(asset) {
@@ -2024,6 +2118,47 @@ function previewNameList(values, limit = 12) {
   return `${items.slice(0, limit).join(", ")}, ... (+${items.length - limit} more)`;
 }
 
+function cloneAnimationClip(
+  clip,
+  {
+    name = clip.name,
+    tracks = clip.tracks.map((track) => track.clone()),
+  } = {},
+) {
+  return new THREE.AnimationClip(name, clip.duration, tracks, clip.blendMode);
+}
+
+function filterClipTracksToBaseRig(clip, allowedNodeNames, packId) {
+  const tracks = clip.tracks
+    .filter((track) => allowedNodeNames.has(getTrackNodeName(track.name)))
+    .map((track) => track.clone());
+  if (tracks.length === 0) {
+    throw new Error(
+      `Animation pack '${packId}' clip '${clip.name}' has no compatible tracks after base-rig filtering`,
+    );
+  }
+  return cloneAnimationClip(clip, { tracks });
+}
+
+function prepareAnimationPackAnimations(baseScene, animations, pack) {
+  const baseNodeNames = collectNamedRigNodes(baseScene);
+  const renameClips = pack.mergePolicy?.renameClips ?? {};
+
+  return animations.map((clip) => {
+    let nextClip = clip;
+    if (pack.mergePolicy?.filterTracksToBaseRig) {
+      nextClip = filterClipTracksToBaseRig(nextClip, baseNodeNames, pack.id);
+    }
+
+    const renamedClip = renameClips[nextClip.name];
+    if (typeof renamedClip === "string" && renamedClip.trim() !== "") {
+      nextClip = cloneAnimationClip(nextClip, { name: renamedClip });
+    }
+
+    return nextClip;
+  });
+}
+
 function getAssetSourceLabel(source) {
   return source?.displayName ?? source?.id ?? source?.path ?? "unknown source";
 }
@@ -2036,10 +2171,11 @@ function validateAnimationPackCompatibility(baseScene, packScene, pack, packAnim
   const missingAnimatedNodeNames = [...collectAnimatedTrackNodeNames(packAnimations)]
     .filter((name) => !baseNodeNames.has(name))
     .sort();
+  const allowExtraNamedNodes = pack.compatibility?.allowExtraNamedNodes === true;
 
   if (
     missingNodeNames.length === 0 &&
-    extraNodeNames.length === 0 &&
+    (allowExtraNamedNodes || extraNodeNames.length === 0) &&
     missingAnimatedNodeNames.length === 0
   ) {
     return;
@@ -2049,7 +2185,7 @@ function validateAnimationPackCompatibility(baseScene, packScene, pack, packAnim
   if (missingNodeNames.length > 0) {
     issues.push(`missing rig nodes: ${previewNameList(missingNodeNames)}`);
   }
-  if (extraNodeNames.length > 0) {
+  if (!allowExtraNamedNodes && extraNodeNames.length > 0) {
     issues.push(`extra rig nodes: ${previewNameList(extraNodeNames)}`);
   }
   if (missingAnimatedNodeNames.length > 0) {
@@ -2126,22 +2262,32 @@ async function loadStageCatalog() {
 
 async function loadHero(scene, asset) {
   const loader = new GLTFLoader();
-  const pistolAttachment = asset.attachments?.pistol ?? null;
-  const pistolLoadPromise = pistolAttachment ? loader.loadAsync(pistolAttachment.path) : Promise.resolve(null);
   const baseGltf = await loader.loadAsync(asset.path);
   const animationPacks = getAnimationPacks(asset);
-  const [packLoads, pistolGltf] = await Promise.all([
+  const attachmentEntries = Object.entries(asset.attachments ?? {});
+  const [packLoads, attachmentLoads] = await Promise.all([
     Promise.all(
       animationPacks.map(async (pack) => ({
         pack,
         gltf: await loader.loadAsync(pack.path),
       })),
     ),
-    pistolLoadPromise,
+    Promise.all(
+      attachmentEntries.map(async ([key, attachment]) => ({
+        key,
+        attachment,
+        gltf: await loader.loadAsync(attachment.path),
+      })),
+    ),
   ]);
+  const preparedPackLoads = packLoads.map(({ pack, gltf }) => ({
+    pack,
+    gltf,
+    animations: prepareAnimationPackAnimations(baseGltf.scene, gltf.animations, pack),
+  }));
 
-  for (const { pack, gltf } of packLoads) {
-    validateAnimationPackCompatibility(baseGltf.scene, gltf.scene, pack, gltf.animations);
+  for (const { pack, gltf, animations } of preparedPackLoads) {
+    validateAnimationPackCompatibility(baseGltf.scene, gltf.scene, pack, animations);
   }
 
   const mergedClipRegistry = new Map();
@@ -2149,11 +2295,11 @@ async function loadHero(scene, asset) {
   registerAnimationClips(mergedClipRegistry, clipSources, baseGltf.animations, asset);
 
   const packSummaries = [];
-  for (const { pack, gltf } of packLoads) {
+  for (const { pack, animations } of preparedPackLoads) {
     const skippedDuplicates = registerAnimationClips(
       mergedClipRegistry,
       clipSources,
-      gltf.animations,
+      animations,
       pack,
       {
         duplicateBehavior: pack.mergePolicy?.duplicateClipBehavior ?? "error",
@@ -2163,7 +2309,7 @@ async function loadHero(scene, asset) {
 
     packSummaries.push({
       id: pack.id,
-      clips: gltf.animations.length,
+      clips: animations.length,
       skippedDuplicates: skippedDuplicates.length,
     });
   }
@@ -2222,6 +2368,8 @@ async function loadHero(scene, asset) {
       parry: createMaskedClip(clips.get(ACTIONS.parry), UPPER_BODY_NODES, "ParryUpper"),
       pistol: createMaskedClip(clips.get(ACTIONS.pistolStance), UPPER_BODY_NODES, "PistolUpper"),
       pistolShoot: createMaskedClip(clips.get(ACTIONS.pistolShoot), UPPER_BODY_NODES, "PistolShootUpper"),
+      rifle: createMaskedClip(clips.get(ACTIONS.rifleStance), UPPER_BODY_NODES, "RifleUpper"),
+      rifleShoot: createMaskedClip(clips.get(ACTIONS.rifleShoot), UPPER_BODY_NODES, "RifleShootUpper"),
       leftPunch: createMaskedClip(clips.get(ACTIONS.leftPunch), UPPER_BODY_NODES, "PunchJabUpper"),
       rightPunch: createMaskedClip(clips.get(ACTIONS.rightPunch), UPPER_BODY_NODES, "PunchCrossUpper"),
     },
@@ -2241,6 +2389,8 @@ async function loadHero(scene, asset) {
       parry: mixer.clipAction(layeredClips.upper.parry),
       pistol: mixer.clipAction(layeredClips.upper.pistol),
       pistolShoot: mixer.clipAction(layeredClips.upper.pistolShoot),
+      rifle: mixer.clipAction(layeredClips.upper.rifle),
+      rifleShoot: mixer.clipAction(layeredClips.upper.rifleShoot),
       leftPunch: mixer.clipAction(layeredClips.upper.leftPunch),
       rightPunch: mixer.clipAction(layeredClips.upper.rightPunch),
     },
@@ -2282,6 +2432,7 @@ async function loadHero(scene, asset) {
     upperBodyRecoveryTimeLeft: 0,
     upperBodyRecoveryDurations: {
       [ACTIONS.pistolShoot]: CONFIG.pistolShootRecoverySeconds,
+      [ACTIONS.rifleShoot]: CONFIG.pistolShootRecoverySeconds,
       [ACTIONS.leftPunch]: CONFIG.punchRecoverySeconds,
       [ACTIONS.rightPunch]: CONFIG.punchRecoverySeconds,
     },
@@ -2295,12 +2446,16 @@ async function loadHero(scene, asset) {
     attachments: {},
   };
 
-  if (pistolAttachment && pistolGltf?.scene) {
-    hero.attachments.pistol = createPropAttachment(
+  for (const { key, attachment, gltf } of attachmentLoads) {
+    if (!gltf?.scene) {
+      continue;
+    }
+
+    hero.attachments[key] = createPropAttachment(
       model,
-      "pistol",
-      pistolAttachment,
-      pistolGltf.scene,
+      key,
+      attachment,
+      gltf.scene,
     );
   }
 
@@ -2312,6 +2467,7 @@ async function loadHero(scene, asset) {
 
     if (
       finishedClip === "PistolShootUpper" ||
+      finishedClip === "RifleShootUpper" ||
       finishedClip === "PunchJabUpper" ||
       finishedClip === "PunchCrossUpper"
     ) {
@@ -2333,7 +2489,7 @@ async function loadHero(scene, asset) {
     }
   });
 
-  syncPistolVisibility(hero);
+  syncWeaponVisibility(hero);
   syncWeaponAim(hero);
   return hero;
 }
@@ -2709,25 +2865,26 @@ function createPropAttachment(model, key, attachment, sourceScene) {
 }
 
 function attachHeroWeaponVfx(hero) {
-  const pistolAttachment = hero?.attachments?.pistol;
-  if (!pistolAttachment || !runtime.vfx.batchRenderer || !runtime.vfx.pistolMuzzleFlashTexture) {
+  if (!runtime.vfx.batchRenderer || !runtime.vfx.pistolMuzzleFlashTexture) {
     return;
   }
 
-  if (pistolAttachment.muzzleFlash?.root?.parent) {
-    pistolAttachment.muzzleFlash.root.parent.remove(pistolAttachment.muzzleFlash.root);
-  }
+  for (const attachment of Object.values(hero?.attachments ?? {})) {
+    if (attachment.muzzleFlash?.root?.parent) {
+      attachment.muzzleFlash.root.parent.remove(attachment.muzzleFlash.root);
+    }
 
-  pistolAttachment.muzzleFlash = createPistolMuzzleFlash({
-    batchRenderer: runtime.vfx.batchRenderer,
-    texture: runtime.vfx.pistolMuzzleFlashTexture,
-  });
-  pistolAttachment.muzzleAnchor.add(pistolAttachment.muzzleFlash.root);
-  pistolAttachment.muzzleAnchor.updateMatrixWorld(true);
+    attachment.muzzleFlash = createPistolMuzzleFlash({
+      batchRenderer: runtime.vfx.batchRenderer,
+      texture: runtime.vfx.pistolMuzzleFlashTexture,
+    });
+    attachment.muzzleAnchor.add(attachment.muzzleFlash.root);
+    attachment.muzzleAnchor.updateMatrixWorld(true);
+  }
 }
 
-function playPistolMuzzleFlash(now = performance.now() / 1000) {
-  runtime.hero?.attachments?.pistol?.muzzleFlash?.play(now);
+function playActiveWeaponMuzzleFlash(now = performance.now() / 1000) {
+  getActiveWeaponAttachment(runtime.hero)?.muzzleFlash?.play(now);
 }
 
 function createWorldLighting(scene, lighting) {
@@ -3808,7 +3965,7 @@ function updateHero(dt) {
       finishRoll(hero);
     }
   } else if (moveStrength > 0) {
-    const speed = runtime.input.pistolStance
+    const speed = hasActiveWeaponMode()
       ? CONFIG.pistolMoveSpeed
       : runtime.input.crouchModifier
         ? CONFIG.crouchSpeed
@@ -3882,9 +4039,13 @@ function updateAimTarget(dt) {
   runtime.aimPoint.y = runtime.hero.root.position.y + (runtime.world?.stageData?.grounding.aimHeightOffset ?? 0.02);
 
   let targetYaw = Math.atan2(tempVector.x, tempVector.z);
-  const pistolYawTarget = getWeaponDrivenTargetYaw(runtime.hero, runtime.hero.attachments?.pistol, runtime.aimPoint);
-  if (runtime.input.pistolStance && pistolYawTarget != null) {
-    targetYaw = pistolYawTarget;
+  const weaponYawTarget = getWeaponDrivenTargetYaw(
+    runtime.hero,
+    getActiveWeaponAttachment(runtime.hero),
+    runtime.aimPoint,
+  );
+  if (hasActiveWeaponMode() && weaponYawTarget != null) {
+    targetYaw = weaponYawTarget;
   }
   runtime.hero.root.rotation.y = dampAngle(runtime.hero.root.rotation.y, targetYaw, CONFIG.turnLerp, dt);
 }
@@ -3970,12 +4131,9 @@ function syncAttachmentAim(attachment, targetPoint) {
 }
 
 function syncWeaponAim(hero) {
-  const pistolAttachment = hero?.attachments?.pistol;
-  if (!pistolAttachment) {
-    return;
+  for (const attachment of Object.values(hero?.attachments ?? {})) {
+    syncAttachmentAim(attachment, runtime.aimPoint);
   }
-
-  syncAttachmentAim(pistolAttachment, runtime.aimPoint);
 }
 
 function updateStageTracking() {
@@ -4075,6 +4233,8 @@ function updateStatusPanel() {
     ? hero.actionLock
     : hero.upperBodyActionLock === ACTIONS.pistolShoot
       ? "pistolShoot"
+    : hero.upperBodyActionLock === ACTIONS.rifleShoot
+      ? "rifleShoot"
     : hero.upperBodyActionLock === ACTIONS.leftPunch
       ? "leftPunch"
       : hero.upperBodyActionLock === ACTIONS.rightPunch
@@ -4083,10 +4243,14 @@ function updateStatusPanel() {
       ? hero.moveDirection.lengthSq() > 0
         ? "parryMove"
         : "parry"
-    : runtime.input.pistolStance
+    : isWeaponModeActive(WEAPON_MODES.pistol)
       ? hero.moveDirection.lengthSq() > 0
         ? "pistolWalk"
         : "pistolStance"
+    : isWeaponModeActive(WEAPON_MODES.rifle)
+      ? hero.moveDirection.lengthSq() > 0
+        ? "rifleWalk"
+        : "rifleStance"
       : runtime.input.crouchModifier
       ? hero.moveDirection.lengthSq() > 0
         ? "crouchMove"
@@ -4208,7 +4372,7 @@ function resolveLocomotionActionKey(hero) {
     return getDirectionalActionKey("crouch", direction);
   }
 
-  if (runtime.input.pistolStance) {
+  if (hasActiveWeaponMode()) {
     return getDirectionalActionKey("walk", direction);
   }
 
@@ -4252,11 +4416,12 @@ function syncGroundedAnimation(hero, force = false) {
     return;
   }
 
-  if (runtime.input.pistolStance) {
+  if (hasActiveWeaponMode()) {
+    const weaponMode = getActiveWeaponMode();
     const lowerLayer = getLowerBodyLayer(hero, locomotionActionKey);
     playLayeredState(hero, {
-      upperAction: hero.layeredActions.upper.pistol,
-      upperClip: ACTIONS.pistolStance,
+      upperAction: hero.layeredActions.upper[weaponMode],
+      upperClip: WEAPON_STANCE_ACTIONS[weaponMode],
       upperLoop: true,
       lowerAction: lowerLayer.action,
       lowerClip: lowerLayer.clip,
@@ -4281,6 +4446,13 @@ function getUpperBodyLayer(hero) {
     };
   }
 
+  if (hero.upperBodyActionLock === ACTIONS.rifleShoot) {
+    return {
+      action: hero.layeredActions.upper.rifleShoot,
+      clip: ACTIONS.rifleShoot,
+    };
+  }
+
   if (hero.upperBodyActionLock === ACTIONS.leftPunch) {
     return {
       action: hero.layeredActions.upper.leftPunch,
@@ -4301,21 +4473,29 @@ function getLowerBodyLayer(hero, actionKey = resolveLocomotionActionKey(hero)) {
   };
 }
 
-function isPistolPresentationActive(hero) {
+function isWeaponPresentationActive(hero, weaponMode) {
+  const stanceClip = WEAPON_STANCE_ACTIONS[weaponMode];
+  const shootClip = WEAPON_SHOOT_ACTIONS[weaponMode];
+  if (!stanceClip || !shootClip) {
+    return false;
+  }
+
   return (
-    hero.upperBodyActionLock === ACTIONS.pistolShoot ||
-    hero.upperClip === ACTIONS.pistolStance ||
-    hero.upperClip === ACTIONS.pistolShoot
+    hero.upperBodyActionLock === shootClip ||
+    hero.upperClip === stanceClip ||
+    hero.upperClip === shootClip
   );
 }
 
-function syncPistolVisibility(hero) {
-  const pistolAttachment = hero?.attachments?.pistol;
-  if (!pistolAttachment) {
-    return;
-  }
+function syncWeaponVisibility(hero) {
+  for (const weaponMode of ACTIVE_WEAPON_MODES) {
+    const attachment = hero?.attachments?.[weaponMode];
+    if (!attachment) {
+      continue;
+    }
 
-  pistolAttachment.root.visible = isPistolPresentationActive(hero);
+    attachment.root.visible = isWeaponPresentationActive(hero, weaponMode);
+  }
 }
 
 function rotationToDegrees(rotation) {
@@ -4346,7 +4526,7 @@ function playLayeredState(
     hero.currentClip = `${upperClip} + ${lowerClip}`;
     hero.upperClip = upperClip;
     hero.lowerClip = lowerClip;
-    syncPistolVisibility(hero);
+    syncWeaponVisibility(hero);
     return;
   }
 
@@ -4377,7 +4557,7 @@ function playLayeredState(
   hero.currentClip = `${upperClip} + ${lowerClip}`;
   hero.upperClip = upperClip;
   hero.lowerClip = lowerClip;
-  syncPistolVisibility(hero);
+  syncWeaponVisibility(hero);
 }
 
 function configureLayerAction(action, { loop, fade }) {
@@ -4467,14 +4647,14 @@ function requestRoll() {
   showToast(evadeSelection.label);
 }
 
-function requestUpperBodyAction(clipName, label, { requiresPistolStance = false } = {}) {
+function requestUpperBodyAction(clipName, label, { requiresWeaponMode = null } = {}) {
   const hero = runtime.hero;
   if (
     !hero ||
     !hero.grounded ||
     hero.actionLock ||
     hero.upperBodyActionLock ||
-    (requiresPistolStance && !runtime.input.pistolStance)
+    (requiresWeaponMode != null && getActiveWeaponMode() !== requiresWeaponMode)
   ) {
     return false;
   }
@@ -4490,14 +4670,23 @@ function requestPunch(clipName, label) {
   requestUpperBodyAction(clipName, label);
 }
 
-function requestPistolShoot() {
-  if (!requestUpperBodyAction(ACTIONS.pistolShoot, "Pistol shot", {
-    requiresPistolStance: true,
-  })) {
+function requestWeaponShoot() {
+  const weaponMode = getActiveWeaponMode();
+  if (weaponMode === WEAPON_MODES.none) {
     return;
   }
 
-  playPistolMuzzleFlash();
+  if (!requestUpperBodyAction(
+    WEAPON_SHOOT_ACTIONS[weaponMode],
+    `${getWeaponDisplayName(weaponMode)} shot`,
+    {
+      requiresWeaponMode: weaponMode,
+    },
+  )) {
+    return;
+  }
+
+  playActiveWeaponMuzzleFlash();
 }
 
 function finishRoll(hero) {
@@ -4535,7 +4724,7 @@ function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, tim
     hero.upperClip = null;
     hero.lowerClip = null;
     hero.animationMode = "full";
-    syncPistolVisibility(hero);
+    syncWeaponVisibility(hero);
     return nextAction;
   }
 
@@ -4556,7 +4745,7 @@ function playClip(hero, clipName, { loop = true, fade = 0.12, force = false, tim
   hero.upperClip = null;
   hero.lowerClip = null;
   hero.animationMode = "full";
-  syncPistolVisibility(hero);
+  syncWeaponVisibility(hero);
   return nextAction;
 }
 
@@ -4584,7 +4773,7 @@ function clearMovementInput() {
   runtime.input.right = false;
   runtime.input.sprintModifier = false;
   runtime.input.crouchModifier = false;
-  runtime.input.pistolStance = false;
+  runtime.input.cameraAngleShiftActive = false;
   runtime.input.parryModifier = false;
   if (runtime.hero) {
     runtime.hero.moveDirection.set(0, 0, 0);
@@ -4677,6 +4866,90 @@ function setForcedCameraOccludersForTest(names) {
   return runtime.world.forcedCameraOccluders.map((mesh) => mesh.name);
 }
 
+function getAttachmentAimAlignmentDot(attachment) {
+  if (!attachment?.config.aiming?.enabled) {
+    return null;
+  }
+
+  attachment.aimPivot.getWorldPosition(tempAttachmentAimOrigin);
+  tempAttachmentAimDirection.subVectors(runtime.aimPoint, tempAttachmentAimOrigin);
+  if (attachment.config.aiming.horizontalOnly) {
+    tempAttachmentAimDirection.y = 0;
+  }
+  if (tempAttachmentAimDirection.lengthSq() < 0.0001) {
+    return null;
+  }
+
+  tempAttachmentAimDirection.normalize();
+  setVectorFromAxisLabel(
+    attachment.config.aiming.forwardAxis,
+    tempVector,
+  )
+    .applyQuaternion(attachment.meshRoot.getWorldQuaternion(tempQuaternion))
+    .normalize();
+  if (attachment.config.aiming.horizontalOnly) {
+    tempVector.y = 0;
+    if (tempVector.lengthSq() < 0.0001) {
+      return null;
+    }
+    tempVector.normalize();
+  }
+
+  return tempVector.dot(tempAttachmentAimDirection);
+}
+
+function serializeAttachmentForTest(attachment) {
+  if (!attachment) {
+    return null;
+  }
+
+  return {
+    parentBoneName: attachment.parentBone.name,
+    socketName: attachment.socket.name,
+    visible: attachment.root.visible,
+    socketLocalPosition: {
+      x: attachment.socket.position.x,
+      y: attachment.socket.position.y,
+      z: attachment.socket.position.z,
+    },
+    socketLocalRotationDeg: rotationToDegrees(attachment.socket.rotation),
+    aimPivotRotationDeg: rotationToDegrees(attachment.aimPivot.rotation),
+    meshOffsetPosition: {
+      x: attachment.meshRoot.position.x,
+      y: attachment.meshRoot.position.y,
+      z: attachment.meshRoot.position.z,
+    },
+    meshOffsetRotationDeg: rotationToDegrees(attachment.meshRoot.rotation),
+    muzzleAnchorLocalPosition: {
+      x: attachment.muzzleAnchor.position.x,
+      y: attachment.muzzleAnchor.position.y,
+      z: attachment.muzzleAnchor.position.z,
+    },
+    aimForwardAxis: attachment.config.aiming.forwardAxis,
+    aimUpAxis: attachment.config.aiming.upAxis,
+    horizontalOnlyAim: attachment.config.aiming.horizontalOnly,
+    aimAlignmentDot: getAttachmentAimAlignmentDot(attachment),
+    meshAxisCorrectionApplied:
+      Math.abs(attachment.meshRoot.rotation.x) > 0.0001 ||
+      Math.abs(attachment.meshRoot.rotation.y) > 0.0001 ||
+      Math.abs(attachment.meshRoot.rotation.z) > 0.0001,
+  };
+}
+
+function serializeMuzzleFlashForTest(attachment) {
+  if (!attachment?.muzzleFlash) {
+    return null;
+  }
+
+  return {
+    active: attachment.muzzleFlash.isActive(),
+    triggerCount: attachment.muzzleFlash.triggerCount,
+    lastTriggerTime: attachment.muzzleFlash.lastTriggerTime,
+    activeUntilTime: attachment.muzzleFlash.activeUntilTime,
+    durationSeconds: attachment.muzzleFlash.durationSeconds,
+  };
+}
+
 function getTestState() {
   if (!runtime.hero) {
     return {
@@ -4685,31 +4958,9 @@ function getTestState() {
   }
 
   runtime.hero.model.getWorldDirection(tempWorldForward);
-  let pistolAimAlignmentDot = null;
-  if (runtime.hero.attachments?.pistol?.config.aiming?.enabled) {
-    const pistolAttachment = runtime.hero.attachments.pistol;
-    pistolAttachment.aimPivot.getWorldPosition(tempAttachmentAimOrigin);
-    tempAttachmentAimDirection.subVectors(runtime.aimPoint, tempAttachmentAimOrigin);
-    if (pistolAttachment.config.aiming.horizontalOnly) {
-      tempAttachmentAimDirection.y = 0;
-    }
-    if (tempAttachmentAimDirection.lengthSq() >= 0.0001) {
-      tempAttachmentAimDirection.normalize();
-      setVectorFromAxisLabel(
-        pistolAttachment.config.aiming.forwardAxis,
-        tempVector,
-      )
-        .applyQuaternion(pistolAttachment.meshRoot.getWorldQuaternion(tempQuaternion))
-        .normalize();
-      if (pistolAttachment.config.aiming.horizontalOnly) {
-        tempVector.y = 0;
-        if (tempVector.lengthSq() >= 0.0001) {
-          tempVector.normalize();
-        }
-      }
-      pistolAimAlignmentDot = tempVector.dot(tempAttachmentAimDirection);
-    }
-  }
+  const pistolAttachmentState = serializeAttachmentForTest(runtime.hero.attachments?.pistol);
+  const rifleAttachmentState = serializeAttachmentForTest(runtime.hero.attachments?.rifle);
+  const activeWeaponAttachment = getActiveWeaponAttachment(runtime.hero);
 
   const desiredCameraDistance = getActiveCameraOffset(tempCameraOffset).length();
   const currentCameraDistance = runtime.camera.position.distanceTo(runtime.cameraTarget);
@@ -4826,50 +5077,17 @@ function getTestState() {
     aimYawSuppressed: runtime.suppressAimYawUntilCameraSettled,
     sprintModifier: runtime.input.sprintModifier,
     crouchModifier: runtime.input.crouchModifier,
-    pistolStance: runtime.input.pistolStance,
-    pistolPresented: isPistolPresentationActive(runtime.hero),
-    pistolAttachment: runtime.hero.attachments?.pistol
-      ? {
-          parentBoneName: runtime.hero.attachments.pistol.parentBone.name,
-          socketName: runtime.hero.attachments.pistol.socket.name,
-          visible: runtime.hero.attachments.pistol.root.visible,
-          socketLocalPosition: {
-            x: runtime.hero.attachments.pistol.socket.position.x,
-            y: runtime.hero.attachments.pistol.socket.position.y,
-            z: runtime.hero.attachments.pistol.socket.position.z,
-          },
-          socketLocalRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.socket.rotation),
-          aimPivotRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.aimPivot.rotation),
-          meshOffsetPosition: {
-            x: runtime.hero.attachments.pistol.meshRoot.position.x,
-            y: runtime.hero.attachments.pistol.meshRoot.position.y,
-            z: runtime.hero.attachments.pistol.meshRoot.position.z,
-          },
-          meshOffsetRotationDeg: rotationToDegrees(runtime.hero.attachments.pistol.meshRoot.rotation),
-          muzzleAnchorLocalPosition: {
-            x: runtime.hero.attachments.pistol.muzzleAnchor.position.x,
-            y: runtime.hero.attachments.pistol.muzzleAnchor.position.y,
-            z: runtime.hero.attachments.pistol.muzzleAnchor.position.z,
-          },
-          aimForwardAxis: runtime.hero.attachments.pistol.config.aiming.forwardAxis,
-          aimUpAxis: runtime.hero.attachments.pistol.config.aiming.upAxis,
-          horizontalOnlyAim: runtime.hero.attachments.pistol.config.aiming.horizontalOnly,
-          aimAlignmentDot: pistolAimAlignmentDot,
-          meshAxisCorrectionApplied:
-            Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.x) > 0.0001 ||
-            Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.y) > 0.0001 ||
-            Math.abs(runtime.hero.attachments.pistol.meshRoot.rotation.z) > 0.0001,
-        }
-      : null,
-    pistolMuzzleFlash: runtime.hero.attachments?.pistol?.muzzleFlash
-      ? {
-          active: runtime.hero.attachments.pistol.muzzleFlash.isActive(),
-          triggerCount: runtime.hero.attachments.pistol.muzzleFlash.triggerCount,
-          lastTriggerTime: runtime.hero.attachments.pistol.muzzleFlash.lastTriggerTime,
-          activeUntilTime: runtime.hero.attachments.pistol.muzzleFlash.activeUntilTime,
-          durationSeconds: runtime.hero.attachments.pistol.muzzleFlash.durationSeconds,
-        }
-      : null,
+    cameraAngleShiftActive: runtime.input.cameraAngleShiftActive,
+    weaponMode: getActiveWeaponMode(),
+    pistolStance: isWeaponModeActive(WEAPON_MODES.pistol),
+    pistolPresented: isWeaponPresentationActive(runtime.hero, WEAPON_MODES.pistol),
+    riflePresented: isWeaponPresentationActive(runtime.hero, WEAPON_MODES.rifle),
+    pistolAttachment: pistolAttachmentState,
+    rifleAttachment: rifleAttachmentState,
+    activeWeaponAttachment: serializeAttachmentForTest(activeWeaponAttachment),
+    pistolMuzzleFlash: serializeMuzzleFlashForTest(runtime.hero.attachments?.pistol),
+    rifleMuzzleFlash: serializeMuzzleFlashForTest(runtime.hero.attachments?.rifle),
+    activeWeaponMuzzleFlash: serializeMuzzleFlashForTest(activeWeaponAttachment),
     parryModifier: runtime.input.parryModifier,
     mouse: {
       x: runtime.mouse.clientX,

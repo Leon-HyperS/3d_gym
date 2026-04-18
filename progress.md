@@ -247,3 +247,40 @@ Original prompt: inspect the repo and understands how the assets are being lever
   - Verified with:
     - `npm.cmd run build`
     - `node scripts/city-stage-probe.mjs http://localhost:5173/`
+
+## 2026-04-18
+
+- Rifle stance integration:
+  - Extended `public/assets/index.json` with two rifle animation-pack entries for `Rifle Idle.glb` and `Firing Rifle.glb`, plus a `rifle` attachment entry that mounts `SCAR.glb` through the existing right-hand socket pipeline.
+  - Updated `src/main.js` to normalize all attachment definitions generically, filter the rifle pack tracks back to the base rig, rename the rifle clips to `Rifle_Idle_Loop` / `Rifle_Shoot`, and register rifle upper-body masked actions beside the existing pistol layers.
+  - Replaced the pistol-only runtime state with a shared `weaponMode` flow (`none | pistol | rifle`) so locomotion slowdown, camera target push, aim-driven yaw, HUD slot state, attachment visibility, and muzzle-flash routing all resolve from the active weapon selection.
+  - Rebound controls so:
+    - `Digit1` toggles pistol on/off
+    - `Digit2` toggles rifle on/off
+    - `LMB` fires the currently selected weapon
+    - `RMB` keeps the camera pan + face-front recenter behavior without changing weapon selection
+    - `V` is no longer bound
+  - Updated `index.html` to advertise the new weapon toggles and RMB camera recenter.
+  - Expanded `window.__TEST__.getState()` so the probes can inspect `weaponMode`, both weapon attachments, and both muzzle flashes from the same stable test seam.
+  - Updated `scripts/hud-probe.mjs` to verify the new `Digit1` / `Digit2` HUD slot activation and to keep the remaining debug-key coverage on `Digit3`-`Digit9`.
+  - Updated `scripts/city-stage-probe.mjs` to verify:
+    - unarmed LMB clicks are ignored
+    - pistol selection and pistol firing still work
+    - switching directly from pistol to rifle works
+    - rifle firing uses the shared muzzle-flash path
+    - RMB still recenters the camera and preserves pointer position while weapon selection persists
+  - Tuned the initial `SCAR.glb` mesh offset calibration down from an oversized first pass to a smaller in-hand mount and verified it visually with `artifacts/rifle-stance-check.png` and `artifacts/rifle-shoot-check.png`.
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/hud-probe.mjs http://localhost:5173/`
+    - `node scripts/city-stage-probe.mjs http://localhost:5173/`
+- Rifle stance follow-up fixes:
+  - Corrected the shared camera behavior in `src/main.js` so selecting pistol or rifle no longer changes the camera target framing on its own. The forward camera-target push now only applies while RMB camera recenter is actively held, leaving the existing special-area camera modes untouched.
+  - Added `runtime.input.cameraAngleShiftActive` and exposed it through `window.__TEST__.getState()` so the city smoke probe can distinguish passive weapon selection from an active RMB camera shift.
+  - Moved the rifle off the reused pistol socket name onto its own `rifle_socket_r` definition in `public/assets/index.json`, then retuned the SCAR mesh offset around the actual grip point after inspecting the authored `SCAR.glb` bounds and confirming its pivot is near the model center.
+  - Reduced the rifle scale again and shifted the grip/muzzle calibration so the weapon sits closer to the right hand instead of reading like it is anchored around its center.
+  - Updated `scripts/city-stage-probe.mjs` so weapon toggles now assert stable non-RMB camera framing, while RMB still asserts the forward target push and recenter behavior.
+  - Re-verified with:
+    - `npm.cmd run build`
+    - `node scripts/hud-probe.mjs http://localhost:5173/`
+    - `node scripts/city-stage-probe.mjs http://localhost:5173/`
