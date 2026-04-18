@@ -347,9 +347,9 @@ try {
     "entering pistol stance should immediately rotate the hero to player-front for the target camera angle",
   );
   assert.ok(
-    Math.abs(pistolStance.mouse.x - 720) < 1 &&
-    Math.abs(pistolStance.mouse.y - 450) < 1,
-    "entering pistol stance should recenter the crosshair",
+    Math.abs(pistolStance.mouse.x - beforePistolPan.mouse.x) < 1 &&
+    Math.abs(pistolStance.mouse.y - beforePistolPan.mouse.y) < 1,
+    "entering pistol stance should preserve the current pointer screen position instead of forcing screen center",
   );
   assert.ok(
     pistolStance.pistolAttachment?.muzzleAnchorLocalPosition?.x > 0.1,
@@ -459,9 +459,9 @@ try {
     "V should visibly pan the camera to a new alignment angle",
   );
   assert.ok(
-    Math.abs(afterCameraAlign.mouse.x - 720) < 1 &&
-    Math.abs(afterCameraAlign.mouse.y - 450) < 1,
-    "V should reset the crosshair back to the center of the screen",
+    Math.abs(afterCameraAlign.mouse.x - beforeCameraAlign.mouse.x) < 1 &&
+    Math.abs(afterCameraAlign.mouse.y - beforeCameraAlign.mouse.y) < 1,
+    "V should preserve the current pointer screen position instead of forcing the crosshair to screen center",
   );
   assert.ok(
     angleDifferenceDeg(afterCameraAlign.camera.yawDeg, beforeCameraAlign.camera.yawDeg) > 20,

@@ -634,7 +634,10 @@ function snapCameraAndFacePlayerFront() {
   resetAimPointFromHero(hero);
   runtime.suppressAimYawUntilCameraSettled = true;
   runtime.mouse.overUi = false;
-  updatePointerFromClient(window.innerWidth * 0.5, window.innerHeight * 0.5);
+  updatePointerFromClient(
+    THREE.MathUtils.clamp(runtime.mouse.clientX, 0, window.innerWidth),
+    THREE.MathUtils.clamp(runtime.mouse.clientY, 0, window.innerHeight),
+  );
 }
 
 function setPistolStanceActive(nextActive) {

@@ -240,3 +240,10 @@ Original prompt: inspect the repo and understands how the assets are being lever
   - Verified with:
     - `npm.cmd run build`
     - `node scripts/city-stage-probe.mjs http://localhost:5173/`
+- Preserve pointer position on camera recenter:
+  - Removed the forced `updatePointerFromClient(window.innerWidth * 0.5, window.innerHeight * 0.5)` call from `snapCameraAndFacePlayerFront()` in `src/main.js`.
+  - The recenter helper now refreshes the crosshair from the already tracked `runtime.mouse.clientX/Y` values instead, so RMB pistol-stance entry and `V` camera-align preserve the current mouse screen position instead of snapping to a fixed center point.
+  - Updated `scripts/city-stage-probe.mjs` so both the pistol-stance and `V` camera-align regressions now assert pointer preservation rather than a forced center snap.
+  - Verified with:
+    - `npm.cmd run build`
+    - `node scripts/city-stage-probe.mjs http://localhost:5173/`
